@@ -253,7 +253,7 @@ class Terminal(App):
                 self.wm.set_clipboard(t)
                 self.wm.toast('Copied')
             self.sel = None
-        elif k in ('ctrl+shift+v', 'shift+insert'):
+        elif k in ('ctrl+shift+v', 'shift+insert', 'ctrl+v'):
             self.on_paste(self.wm.clipboard)
         else:
             s = self.vt.encode_key(k, ev.char)

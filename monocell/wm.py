@@ -1748,8 +1748,8 @@ Alt+Enter         new terminal     Alt+S  text screenshot (.md)
 Hold the middle button and move the mouse/trackpoint to scroll the window
 under the pointer.  Copy & paste: Shift+drag selects text in any window and
 copies it (Ctrl+Shift+drag: rectangle); in the terminal and editor a plain
-drag selects.  Ctrl+Shift+C copies, Ctrl+Shift+V / Shift+Insert / a middle
-click pastes - also on the Linux console.  Right-click shows Copy/Paste.
+drag selects.  Ctrl+Shift+C copies, Ctrl+Shift+V / Ctrl+V / Shift+Insert / a
+middle click pastes - also on the Linux console.  Right-click shows Copy/Paste.
 monocell-clip prints or sets the shared clipboard in any shell.  KDE Connect (System menu): pair the phone, send or
 pull the clipboard, share files.  Browser: Ctrl+L address, Tab links, Enter
 opens, Ctrl+D bookmark, Ctrl+F find.  Music: Space plays, n/p next.

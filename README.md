@@ -73,7 +73,7 @@ Die Apps haben eigene Tasten (im Editor `Ctrl+S/O/F`, im Browser `Ctrl+L`, `Tab`
 
 * **Shift+Ziehen** markiert Text in jedem Fenster und kopiert ihn beim Loslassen
   (**Ctrl+Shift+Ziehen**: Rechteck). In Terminal und Editor markiert schon normales Ziehen.
-* **Ctrl+Shift+C** kopiert, **Ctrl+Shift+V**, **Shift+Insert** oder ein **Mittelklick**
+* **Ctrl+Shift+C** kopiert, **Ctrl+Shift+V**, **Ctrl+V**, **Shift+Insert** oder ein **Mittelklick**
   fügen ein; **Rechtsklick** zeigt Kopieren/Einfügen. Das funktioniert auch auf der
   Linux-Konsole: deren Keymap verschluckt Shift bei Ctrl+Shift+V – Monocell fragt den
   Modifier-Zustand dort direkt beim Kernel ab (`TIOCL_GETSHIFTSTATE`).
@@ -106,7 +106,7 @@ monocell-clip --clear
   lite-Engine eine reine JavaScript-Seite, weist sie darauf hin, auf Chromium zu wechseln.
 * **Terminal** – eigener VT100/xterm-Emulator (Farben, Alternativbildschirm, Maus,
   Bracketed Paste, Scrollback, Kopieren per Ziehen) auf einer echten PTY; vim, top, less
-  laufen darin. `Ctrl+Shift+C` kopiert, `Ctrl+Shift+V`/`Shift+Insert`/Mittelklick fügt ein.
+  laufen darin. `Ctrl+Shift+C` kopiert, `Ctrl+Shift+V`/`Ctrl+V`/`Shift+Insert`/Mittelklick fügt ein.
 * **opencode** – öffnet die opencode-TUI in einem Terminalfenster. Standard ist die
   lokale Installation; mit `user@host` unter Einstellungen → Tools läuft sie stattdessen
   per SSH auf einem anderen Rechner. Schlägt die Verbindung fehl, startet lokal
