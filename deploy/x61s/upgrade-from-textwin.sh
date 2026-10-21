@@ -54,7 +54,7 @@ if i >= 0 and j >= 0:
     open(p, 'w').write(s[:i] + s[j + len(b) + 1:])
     print('removed old autostart block from', p)
 PY
-    chown "$USER_NAME" "$(id -gn "$USER_NAME")" "$PROFILE"
+    chown "$USER_NAME:$(id -gn "$USER_NAME")" "$PROFILE"
 done
 
 echo "--- installing monocell (system copy)"
