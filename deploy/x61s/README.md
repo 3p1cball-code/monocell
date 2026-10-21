@@ -22,6 +22,21 @@ sudo ~/monocell/deploy/x61s/install-vt.sh --user ariedel
 sudo ~/monocell/deploy/x61s/install-login.sh --user ariedel
 ```
 
+## Umstieg von der alten `textwin`-Installation
+
+Läuft auf dem Gerät noch die frühere Version, übernimmt dieses Skript den Umbau:
+alte `textwin`-Units, Launcher, `/opt/textwin`, Polkit-Regel, GRUB-Eintrag und den
+Autostart-Block werden entfernt, danach werden die monocell-Systemdateien normal
+installiert.
+
+```sh
+sudo ~/monocell-src/deploy/x61s/upgrade-from-textwin.sh --user ariedel
+```
+
+Danach neu starten und im GRUB-Menü **„monocell (text console)“** wählen (oder den
+normalen Eintrag nehmen). `--keep-old` behält `/opt/textwin`, `--no-grub` lässt den
+GRUB-Teil aus.
+
 `install-vt.sh` installiert Code und Launcher (standardmäßig **kein** loginloser Dienst),
 `install-login.sh` richtet den Text-Login ein:
 
