@@ -16,10 +16,11 @@ Hardware (getestet gegen ein ThinkPad X61s mit 1024×768).
 *Screenshots aus dem Demo-Home, 120–160 Spalten. Die Fensterrahmen skalieren mit dem
 Terminal; alles hier ist echte Ausgabe, keine Mockups.*
 
-**Text-Screenshot:** `Alt+S` speichert den ganzen Bildschirm als Markdown-Datei mit
-24-Bit-ANSI-Farben (Standard: `~/monocell-shots/`). GitHub rendert den `ansi`-Block,
-`cat`/`bat`/`less -R` zeigen die exakten Farben; eine Klartext-Kopie im selben File
-bleibt ohne Farben lesbar. Beispiel: [screenshots/desktop-text.md](screenshots/desktop-text.md).
+**Text-Screenshot:** `Alt+S` speichert den ganzen Bildschirm als Markdown-Datei
+(Standard: `~/monocell-shots/`). Oben steht eine Klartext-Kopie (lesbar auf GitHub und in
+jedem Editor), darunter eine eingeklappte Fassung mit 24-Bit-ANSI-Farben; `cat`, `bat`
+oder `less -R` im Terminal zeigen damit die exakten Farben. GitHub rendert ANSI in
+Repo-Dateien nicht. Beispiel: [screenshots/desktop-text.md](screenshots/desktop-text.md).
 
 ## Starten
 

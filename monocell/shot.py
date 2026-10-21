@@ -1,7 +1,8 @@
 """Text screenshots: the whole screen as a Markdown file with ANSI colours.
 
-The file opens in any text editor (line breaks and characters are plain text) and
-GitHub (or `cat` in a terminal) renders the 16 palette colours of the `ansi` block.
+The file opens in any text editor (line breaks and characters are plain text). A plain
+copy is visible everywhere; the collapsed block keeps exact 24-bit ANSI colours for
+terminals such as cat, bat or less -R.
 """
 import datetime
 import os
@@ -65,15 +66,14 @@ def markdown(buf, palette, palette_name, host, version, when=None, title='Monoce
     cols, lines = buf.w, buf.h
     out = ['# %s screenshot — %s' % (title, stamp), '',
            '%d×%d · host `%s` · palette `%s` · v%s' % (cols, lines, host, palette_name, version),
-           '', fence + 'ansi']
-    out += ansi
-    out += [fence, '',
-            '> The `ansi` block keeps the exact 24-bit palette; GitHub renders it, and',
-            '> so do terminals (`cat`, `bat`, `less -R`).',
-            '> Viewers without ANSI support show the escape codes; the plain copy below is clean.',
-            '', '<details><summary>Plain text (no colour)</summary>', '',
-            fence + 'text']
+           '', fence + 'text']
     out += plain
+    out += [fence, '',
+            '> GitHub shows this plain copy. The colour version below stores the exact 24-bit',
+            '> palette; `cat`, `bat`, `less -R` or an ANSI-aware viewer render it.',
+            '', '<details><summary>Colour version (ANSI, exact palette)</summary>', '',
+            fence + 'ansi']
+    out += ansi
     out += [fence, '', '</details>', '', '## Palette', '']
     pairs = ['`%d %s`' % (i, '#' + h) for i, h in enumerate(palette)]
     out += [' '.join(pairs[:8]), '', ' '.join(pairs[8:]), '']
