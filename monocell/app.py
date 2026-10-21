@@ -10,6 +10,7 @@ class App:
     min_size = (16, 3)
     resizable = True
     single = False           # only one instance (focus existing)
+    shift_select = False     # True: the app uses Shift+click itself (no screen text selection)
 
     def __init__(self, wm, win, **kw):
         self.wm = wm
@@ -119,6 +120,10 @@ class App:
 
     def on_paste(self, text):
         pass
+
+    def selection_text(self):
+        """Text the app has selected itself (used by Copy / Ctrl+Shift+C)."""
+        return ''
 
     def on_resize(self, w, h):
         pass

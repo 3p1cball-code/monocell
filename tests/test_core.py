@@ -330,6 +330,26 @@ class TestLogo(unittest.TestCase):
         self.assertEqual((w, h), (96, 11))
 
 
+class TestVTModifiers(unittest.TestCase):
+    def test_state_bits(self):
+        from monocell.term import vt_state_mods
+        self.assertEqual(vt_state_mods(0), set())
+        self.assertEqual(vt_state_mods(1 | 4), {'shift', 'ctrl'})
+        self.assertEqual(vt_state_mods(16 | 128), {'shift', 'ctrl'})
+        self.assertEqual(vt_state_mods(8), {'alt'})
+
+    def test_augment(self):
+        from monocell.term import augment_key
+        self.assertEqual(augment_key('ctrl+v', {'ctrl', 'shift'}), 'ctrl+shift+v')
+        self.assertEqual(augment_key('ctrl+c', {'ctrl'}), 'ctrl+c')
+        self.assertEqual(augment_key('insert', {'shift'}), 'shift+insert')
+        self.assertEqual(augment_key('insert', {'ctrl'}), 'ctrl+insert')
+        self.assertEqual(augment_key('up', {'shift', 'ctrl'}), 'ctrl+shift+up')
+        self.assertEqual(augment_key('alt+up', {'shift'}), 'alt+shift+up')
+        self.assertEqual(augment_key('enter', {'shift'}), 'enter')
+        self.assertEqual(augment_key('f5', {'ctrl'}), 'f5')
+
+
 class TestKDEConnect(unittest.TestCase):
     def test_parse_devices(self):
         from monocell.apps.kdeconnect import parse_devices

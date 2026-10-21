@@ -21,11 +21,12 @@ from .screen import Buffer
 
 
 class Key:
-    __slots__ = ('key', 'char')
+    __slots__ = ('key', 'char', 'orig')
 
     def __init__(self, key, char=None):
         self.key = key
         self.char = char
+        self.orig = None        # key name before VT modifier augmentation
 
     def __repr__(self):
         return 'Key(%r)' % self.key
@@ -95,6 +96,39 @@ def char_key(c, alt=False):
     if alt:
         return Key('alt+' + c.lower() if c.isalpha() and c.islower() else 'alt+' + c)
     return Key(c, c)
+
+
+TIOCLINUX = 0x541C
+VT_MOD_KEYS = ('insert', 'delete', 'home', 'end', 'pgup', 'pgdn', 'up', 'down', 'left', 'right')
+
+
+def vt_state_mods(state):
+    """Linux VT shift state (TIOCL_GETSHIFTSTATE bits) -> set of modifier names."""
+    mods = set()
+    if state & (1 | 16 | 32):          # KG_SHIFT, KG_SHIFTL, KG_SHIFTR
+        mods.add('shift')
+    if state & (4 | 64 | 128):         # KG_CTRL, KG_CTRLL, KG_CTRLR
+        mods.add('ctrl')
+    if state & 8:                      # KG_ALT
+        mods.add('alt')
+    return mods
+
+
+def augment_key(key, mods):
+    """Add modifiers the Linux console keymap swallowed (Ctrl+Shift+V arrives as Ctrl+V,
+    Shift+Insert as Insert). Only control letters and navigation keys are touched."""
+    parts = key.split('+')
+    base, have = parts[-1], set(parts[:-1])
+    if len(base) == 1 and 'ctrl' in have:
+        add = {'shift'} & mods
+    elif base in VT_MOD_KEYS:
+        add = {'shift', 'ctrl'} & mods
+    else:
+        return key
+    if not add - have:
+        return key
+    have |= add
+    return ''.join(m + '+' for m in ('ctrl', 'alt', 'shift') if m in have) + base
 
 
 class InputParser:
@@ -339,6 +373,26 @@ class Terminal:
         self.saved = None
         self.cursor = None              # (x, y) to show hardware cursor, else hidden
         self.bytes_out = 0
+        try:
+            name = os.ttyname(self.fd_in)
+        except OSError:
+            name = ''
+        # on a kernel VT the keymap drops Shift from Ctrl+Shift+V etc.; ask the kernel instead
+        self.on_vt = bool(re.match(r'/dev/tty\d+$', name)) and self.mode == 'linux'
+
+    def vt_shift_state(self):
+        if not self.on_vt:
+            return 0
+        try:
+            buf = bytearray([6])        # TIOCL_GETSHIFTSTATE
+            fcntl.ioctl(self.fd_in, TIOCLINUX, buf, True)
+            return buf[0]
+        except OSError:
+            self.on_vt = False
+            return 0
+
+    def vt_mods(self):
+        return frozenset(vt_state_mods(self.vt_shift_state())) if self.on_vt else frozenset()
 
     # ---------- setup ----------
     def query_size(self):
@@ -517,4 +571,15 @@ class Terminal:
             return []
         if not data:
             return None
-        return self.parser.feed(self.decoder.decode(data))
+        evs = self.parser.feed(self.decoder.decode(data))
+        if self.on_vt and evs:
+            mods = None
+            for ev in evs:
+                if isinstance(ev, Key) and not ev.char:
+                    if mods is None:
+                        mods = vt_state_mods(self.vt_shift_state())
+                    if mods:
+                        k2 = augment_key(ev.key, mods)
+                        if k2 != ev.key:
+                            ev.orig, ev.key = ev.key, k2
+        return evs

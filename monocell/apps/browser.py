@@ -1,6 +1,7 @@
 """Web browser: lite (urllib) or headless Chromium engine, laid out as clean text."""
 import os
 import re
+import threading
 import urllib.parse
 
 from .. import imaging, web
@@ -323,10 +324,17 @@ class Browser(App):
         self.engine_name = self.pick_engine()
         self.img_cache = {}
         self.img_loading = set()
+        self.img_gen = 0           # bumped (debounced) when images arrive -> one relayout
+        self.relayout_pending = False
+        self.engine_lock = threading.Lock()
         self.edit = None           # (widget, TextField) while typing into a page field
         self.find = None
         self.reader = True
-        self.navigate(url or self.cfg.get('web_home') or HOME_URL)
+        start = url or self.cfg.get('web_home') or HOME_URL
+        if self.engine_name == 'chromium' and start == HOME_URL:
+            # start the headless browser while the user is still typing an address
+            self.thread(self.get_engine, lambda e: None, lambda e: None)
+        self.navigate(start)
 
     def pick_engine(self):
         pref = self.cfg.get('web_engine', 'auto')
@@ -337,6 +345,10 @@ class Browser(App):
         return 'lite'
 
     def get_engine(self):
+        with self.engine_lock:
+            return self._get_engine()
+
+    def _get_engine(self):
         if self.engine is None:
             if self.engine_name == 'chromium':
                 try:
@@ -474,26 +486,33 @@ class Browser(App):
                 _, ct, data = web.fetch(src, max_bytes=6_000_000, headers={'Accept': 'image/*'})
                 if 'svg' in ct or src.lower().endswith('.svg'):
                     return None          # vector images are skipped quietly
-                return imaging.from_bytes(data, max_side=800)
+                img = imaging.from_bytes(data, max_side=800)
+                # decode + dither here, not in the UI thread
+                return imaging.render_fit(self.wm, img, maxw, 42) if img is not None else None
 
-            def done(img, key=key, maxw=maxw):
+            def done(res, key=key):
                 self.img_loading.discard(key)
-                if img is None:
-                    self.img_cache[key] = 'err'
-                    self.layout_key = None
-                    self.invalidate()
-                    return
-                rows, cw, chh = imaging.render_fit(self.wm, img, maxw, 42)
-                self.img_cache[key] = (rows, cw, chh)
-                self.layout_key = None
-                self.invalidate()
+                self.img_cache[key] = res if res is not None else 'err'
+                self.images_changed()
 
             def fail(e, key=key):
                 self.img_loading.discard(key)
                 self.img_cache[key] = 'err'
-                self.layout_key = None
-                self.invalidate()
+                self.images_changed()
             self.thread(work, done, fail)
+
+    def images_changed(self):
+        """Coalesce image arrivals into one relayout every 0.35 s and keep fetching."""
+        self.request_images()
+        if self.relayout_pending:
+            return
+        self.relayout_pending = True
+
+        def go():
+            self.relayout_pending = False
+            self.img_gen += 1
+            self.invalidate()
+        self.later(0.35, go)
 
     def on_theme(self):
         self.img_cache = {}
@@ -524,7 +543,7 @@ class Browser(App):
         if self.doc is None:
             cv.put(2, 3, 'Loading...', th.c('dim', 'win'))
         else:
-            key = (cw, id(self.doc), len(self.img_cache), tuple(sorted((k, v) for k, v in self.values.items()
+            key = (cw, id(self.doc), self.img_gen, tuple(sorted((k, v) for k, v in self.values.items()
                                                                        if isinstance(k, int)))[:50])
             if key != self.layout_key:
                 self.layout = Layout(self, self.doc, cw)

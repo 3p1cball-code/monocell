@@ -64,6 +64,14 @@ Die Apps haben eigene Tasten (im Editor `Ctrl+S/O/F`, im Browser `Ctrl+L`, `Tab`
 
 ### Zwischenablage
 
+* **Shift+Ziehen** markiert Text in jedem Fenster und kopiert ihn beim Loslassen
+  (**Ctrl+Shift+Ziehen**: Rechteck). In Terminal und Editor markiert schon normales Ziehen.
+* **Ctrl+Shift+C** kopiert, **Ctrl+Shift+V**, **Shift+Insert** oder ein **Mittelklick**
+  fügen ein; **Rechtsklick** zeigt Kopieren/Einfügen. Das funktioniert auch auf der
+  Linux-Konsole: deren Keymap verschluckt Shift bei Ctrl+Shift+V – Monocell fragt den
+  Modifier-Zustand dort direkt beim Kernel ab (`TIOCL_GETSHIFTSTATE`).
+* Eingabefelder (Adresszeile, Dialoge, Suche) verstehen `Ctrl+V` direkt.
+
 Monocell hält eine gemeinsame Zwischenablage (auch über Sitzungen hinweg) in
 `~/.cache/monocell/clipboard`. In modernen Terminals geht sie zusätzlich per OSC 52 an
 die System-Zwischenablage. Auf der Linux-Konsole gibt es keine System-Zwischenablage –
@@ -80,7 +88,11 @@ monocell-clip --clear
 * **Dateien** – navigieren, kopieren/ausschneiden/einfügen, umbenennen, Papierkorb
   (freedesktop), neue Ordner/Dateien, Vorschau (Text/Bild), Öffnen mit …
 * **Browser** – zwei Engines: `lite` (urllib + HTML-Parser, ohne JavaScript, sehr schnell)
-  und **Chromium/Brave headless über das DevTools-Protokoll** (JavaScript/SPA). Beide
+  und **Chromium/Brave headless über das DevTools-Protokoll** (JavaScript/SPA). Die
+  Chromium-Engine startet schon beim Öffnen des Fensters, blockiert Schriften, Medien und
+  Werbe-/Tracking-Domains, wartet nicht auf nachladende Werbung und nutzt
+  `--password-store=basic` (ohne Desktop-Sitzung hing die erste Anfrage sonst 25 s am
+  Schlüsselbund). Beide
   werden in dasselbe Zellen-Layout umgesetzt: Lesemodus (`Aa` in der Leiste schaltet
   zwischen Lesemodus und ganzer Seite), Links, Formulare, Tabellen, Symbole und Bilder
   als geditherte Blöcke. Kein Screenshot→ASCII, sondern DOM→Text. Erkennt die
@@ -100,9 +112,11 @@ monocell-clip --clear
   Connect/Disconnect (`tailscale up/down`). Der Deploy richtet den Operator ein, damit
   das ohne Root funktioniert.
 * **Editor** – Zeilennummern, Suchen/Ersetzen, Undo, Syntaxhervorhebung.
-* **PDF** – Seiten werden mit poppler (`pdftocairo`/`pdftoppm`) gerastert und als Textzellen
-  rekonstruiert (Fit-Seite/-Breite, Zoom, Blättern, fünf Darstellungsmodi); zusätzlich eine
-  Textansicht der Seite (`pdftotext`) zum Lesen und Scrollen.
+* **PDF** – drei Ansichten per Umschalter in der Leiste (oder `t`/`a`/`v`): **Page** rastert
+  die Seite mit poppler (`pdftocairo`/`pdftoppm`) zu Farbzellen (blend/pixel/grey/mono,
+  Fit-Seite/-Breite, Zoom), **Text** zeigt den extrahierten Text (`pdftotext`) zum Lesen,
+  Markieren und Kopieren, **ASCII** zeichnet die Seite als ASCII-Art (Tinte als Zeichen auf
+  dunklem Grund).
 * **Writer** – Markdown-basierter Wortprozessor, zentrierte Spalte, Fokusmodus,
   `.docx`/`.odt` importieren, `.docx` exportieren.
 * **Sheets** – Formeln (`=SUM(A1:A5)`, `IF`, `ROUND`, …), CSV/TSV/XLSX/ODS lesen,

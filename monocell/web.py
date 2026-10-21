@@ -624,6 +624,19 @@ EXTRACT_JS = r"""
 """
 
 
+# Requests the text view never needs; on slow machines they cost most of the load time.
+BLOCKED_URLS = [
+    '*.woff', '*.woff2', '*.ttf', '*.otf', '*.eot',
+    '*.mp4', '*.webm', '*.m3u8', '*.mp3', '*.ogg', '*.m4a',
+    '*doubleclick.net*', '*googlesyndication.com*', '*google-analytics.com*', '*googletagmanager.com*',
+    '*googleadservices.com*', '*adservice.google.*', '*connect.facebook.net*', '*facebook.com/tr*',
+    '*hotjar.com*', '*criteo.*', '*taboola.com*', '*outbrain.com*', '*amazon-adsystem.com*',
+    '*scorecardresearch.com*', '*adnxs.com*', '*pubmatic.com*', '*rubiconproject.com*',
+    '*moatads.com*', '*chartbeat.*', '*newrelic.com*', '*nr-data.net*', '*sentry.io*',
+    '*cookielaw.org*', '*onetrust.com*', '*usercentrics.eu*', '*consensu.org*',
+]
+
+
 class Chromium:
     """One shared headless browser process for all Browser windows."""
     _inst = None
@@ -668,7 +681,16 @@ class Chromium:
         args = [exe, '--headless=new', '--remote-debugging-port=0', '--remote-allow-origins=*',
                 '--user-data-dir=' + self.dir, '--no-first-run', '--no-default-browser-check', '--disable-gpu',
                 '--mute-audio', '--window-size=1200,1600', '--disable-extensions', '--hide-scrollbars',
-                '--blink-settings=imagesEnabled=true', 'about:blank']
+                '--blink-settings=imagesEnabled=true',
+                # without a desktop session the keyring lookup blocks the first request for the
+                # 25 s D-Bus timeout; cookies are encrypted with the built-in key instead
+                '--password-store=basic',
+                # no background traffic competing with the page on slow machines
+                '--disable-background-networking', '--disable-component-update', '--disable-sync',
+                '--disable-default-apps', '--no-pings', '--disable-breakpad', '--disable-notifications',
+                '--disable-features=Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,'
+                'InterestFeedContentSuggestions,AutofillServerCommunication',
+                'about:blank']
         self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                      stdin=subprocess.DEVNULL, start_new_session=True)
         t0 = time.time()
@@ -742,6 +764,11 @@ class CDPEngine:
         self.call('Runtime.enable')
         self.call('Emulation.setDeviceMetricsOverride', {'width': 1200, 'height': 1600, 'deviceScaleFactor': 1,
                                                          'mobile': False})
+        try:
+            self.call('Network.enable')
+            self.call('Network.setBlockedURLs', {'urls': BLOCKED_URLS})
+        except RuntimeError:
+            pass
 
     def call(self, method, params=None, timeout=30):
         with self.lock:
@@ -762,17 +789,39 @@ class CDPEngine:
             raise RuntimeError(r['exceptionDetails'].get('text', 'JS error'))
         return r.get('result', {}).get('value')
 
-    def wait_ready(self, timeout=15):
+    def mark(self):
+        """Tag the current document so wait_ready() can tell when a new one replaced it."""
+        try:
+            self.evaluate('window.__mcOld = 1', 5)
+        except RuntimeError:
+            pass
+
+    def _state(self):
+        try:
+            v = self.evaluate("(window.__mcOld ? 'old' : 'new') + '|' + document.readyState", 5)
+        except RuntimeError:         # no execution context while the navigation commits
+            v = None
+        return (v or 'new|loading').split('|', 1)
+
+    def wait_ready(self, timeout=15, same_doc_ok=False):
+        """Return once the new document is usable: 'complete', or 'interactive' for a short
+        grace period (ads and trackers often keep 'complete' away for many seconds)."""
         t0 = time.time()
-        time.sleep(0.3)
+        t_int = None
         while time.time() - t0 < timeout:
-            try:
-                if self.evaluate('document.readyState', 5) == 'complete':
+            doc, st = self._state()
+            if doc == 'old':
+                # no new document: a script-only update (SPA click) or a cached history step
+                if same_doc_ok and st == 'complete' and time.time() - t0 > 0.35:
                     break
-            except RuntimeError:
-                pass
-            time.sleep(0.25)
-        time.sleep(0.6)   # let client-side rendering settle
+            elif st == 'complete':
+                break
+            elif st == 'interactive':
+                t_int = t_int or time.time()
+                if time.time() - t_int > 1.2:
+                    break
+            time.sleep(0.08)
+        time.sleep(0.2)      # let client-side rendering settle
 
     reader = True
 
@@ -784,6 +833,7 @@ class CDPEngine:
         return doc
 
     def load(self, url, data=None):
+        self.mark()
         self.call('Page.navigate', {'url': url})
         self.wait_ready()
         return self.extract()
@@ -804,19 +854,21 @@ class CDPEngine:
                   % (sel, json.dumps(value)))
         else:
             return None
+        self.mark()
         r = self.evaluate(js)
         if kind == 'submit' and r == 1:
             for t in ('keyDown', 'keyUp'):
                 self.call('Input.dispatchKeyEvent', {'type': t, 'key': 'Enter', 'code': 'Enter',
                                                      'windowsVirtualKeyCode': 13, 'text': '\r' if t == 'keyDown' else ''})
         if kind in ('click', 'submit', 'select'):
-            self.wait_ready(10)
+            self.wait_ready(10, same_doc_ok=True)
             return self.extract()
         return None
 
     def back(self):
+        self.mark()
         self.evaluate('history.back()')
-        self.wait_ready()
+        self.wait_ready(same_doc_ok=True)
         return self.extract()
 
     def close(self):

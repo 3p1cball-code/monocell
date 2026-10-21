@@ -15,6 +15,8 @@ from .util import fit, log, sym
 from .widgets import Dialog, Menu, MenuItem, TextField, scrollbar
 
 DOUBLE_CLICK = 0.4
+PASTE_KEYS = ('ctrl+shift+v', 'shift+insert', 'ctrl+v')
+COPY_KEYS = ('ctrl+shift+c', 'ctrl+insert', 'ctrl+c')
 
 
 class Window:
@@ -282,11 +284,13 @@ class WM:
         self.hover_part = None
         self.mouse_pos = (-1, -1)
         self.snap_preview = None
-        self.clipboard = clip.load()
+        self._clip = clip.load()
+        self._clip_mtime = clip.mtime()
         self.middle_scroll = None
         self.middle_last = (0, 0)
         self.middle_acc = 0.0
         self.middle_moved = False
+        self.tsel = None                # screen text selection: {'win', 'a', 'b', 'drag'}
         self.hostname = (os.environ.get('MONOCELL_HOSTNAME')
                          or socket.gethostname().split('.')[0])
         self.battery = None
@@ -601,9 +605,89 @@ class WM:
         self.toasts = self.toasts[-4:]
         self.dirty = True
 
+    def copy_text(self, text):
+        if not text:
+            self.toast('Nothing selected - Shift+drag selects text', 'yellow')
+            return
+        self.set_clipboard(text)
+        n = len(text)
+        self.toast('Copied %d character%s' % (n, '' if n == 1 else 's'))
+
+    @staticmethod
+    def accepts_paste(app):
+        from .app import App
+        return app is not None and type(app).on_paste is not App.on_paste
+
+    def paste_into(self, win):
+        if not win or not win.app or not self.accepts_paste(win.app):
+            return
+        if not self.clipboard:
+            self.toast('Clipboard is empty', 'yellow')
+            return
+        win.app.on_paste(self.clipboard)
+        self.dirty = True
+
+    def content_origin(self, win):
+        return (win.x, win.y) if win.borderless else (win.x + 1, win.y + 1)
+
+    def tsel_rows(self):
+        """(y, x0, x1) screen rows covered by the text selection, clipped to the content."""
+        t = self.tsel
+        win = t['win']
+        ox, oy = self.content_origin(win)
+        if win.cw <= 0 or win.ch <= 0:
+            return []
+        (ax, ay), (bx, by) = t['a'], t['b']
+        x_hi, y_hi = ox + win.cw - 1, oy + win.ch - 1
+        if t.get('block'):
+            xa, xb = sorted((max(ox, min(x_hi, ax)), max(ox, min(x_hi, bx))))
+            ya, yb = sorted((max(oy, min(y_hi, ay)), max(oy, min(y_hi, by))))
+            return [(y, xa, xb) for y in range(ya, yb + 1)]
+        if (ay, ax) > (by, bx):
+            (ax, ay), (bx, by) = (bx, by), (ax, ay)
+        if ay < oy:
+            ax, ay = ox, oy
+        if by > y_hi:
+            bx, by = x_hi, y_hi
+        ax, bx = max(ox, min(x_hi, ax)), max(ox, min(x_hi, bx))
+        rows = []
+        for y in range(ay, by + 1):
+            rows.append((y, ax if y == ay else ox, bx if y == by else x_hi))
+        return rows
+
+    def tsel_text(self):
+        if not self.tsel:
+            return ''
+        buf = self.term.back
+        lines = []
+        for y, x0, x1 in self.tsel_rows():
+            if 0 <= y < buf.h:
+                lines.append(''.join(buf.ch[y][x0:x1 + 1]).rstrip())
+        return '\n'.join(lines).strip('\n')
+
+    def edit_menu(self, win, mx, my):
+        sel = self.tsel_text() if self.tsel and self.tsel['win'] is win else \
+            (win.app.selection_text() or '')
+        items = [MenuItem('Copy', lambda: self.copy_text(sel), 'Ctrl+Shift+C', enabled=bool(sel))]
+        if self.accepts_paste(win.app):
+            items.append(MenuItem('Paste', lambda: self.paste_into(win), 'Ctrl+Shift+V',
+                                  enabled=bool(self.clipboard)))
+        items += [None, MenuItem('Shift+drag selects text', enabled=False)]
+        self.menu(items, mx, my)
+
+    @property
+    def clipboard(self):
+        """Shared clipboard; picks up changes made by monocell-clip or another session."""
+        m = clip.mtime()
+        if m != self._clip_mtime:
+            self._clip = clip.load()
+            self._clip_mtime = m
+        return self._clip
+
     def set_clipboard(self, text):
-        self.clipboard = text
+        self._clip = text
         clip.save(text)
+        self._clip_mtime = clip.mtime()
         if self.term.mode != 'linux' and len(text) < 100000:
             try:
                 self.term.write('\x1b]52;c;%s\x07' % base64.b64encode(text.encode()).decode())
@@ -914,6 +998,14 @@ class WM:
             if win.minimized:
                 continue
             self.draw_window(cv, win, win is self.focus)
+        if self.tsel:
+            w = self.tsel['win']
+            if w.closed or w.minimized or w not in self.windows:
+                self.tsel = None
+            else:
+                hl = th.r['bright'] | (th.r['sel'] << 4)
+                for y, x0, x1 in self.tsel_rows():
+                    cv.recolor(x0, y, x1 - x0 + 1, 1, lambda a: (a & ~0xff) | hl)
         if self.snap_preview:
             x, y, w, h = self.snap_preview
             acc = th.c('accent', 'accent')
@@ -1190,9 +1282,14 @@ class WM:
             self.toggle_start()
             return
         if self.popups:
-            self.popups[-1].on_key(ev)
+            p = self.popups[-1]
+            if not p.on_key(ev) and k in PASTE_KEYS and hasattr(p, 'on_paste') and self.clipboard:
+                p.on_paste(self.clipboard)
             return
         win = self.focus
+        if k in COPY_KEYS and self.tsel and not self.tsel['drag']:
+            self.copy_text(self.tsel_text())
+            return
         if k in ('alt+tab', 'alt+`', 'alt+n'):
             self.cycle(1)
             return
@@ -1257,6 +1354,17 @@ class WM:
             if win.app:
                 if win.app.on_key(ev):
                     return
+                if k in PASTE_KEYS:
+                    self.paste_into(win)
+                    return
+                if k in COPY_KEYS and k != 'ctrl+c':
+                    self.copy_text(win.app.selection_text() or '')
+                    return
+                if ev.orig and ev.orig != k:
+                    # the app does not know the console-detected modifier: plain key again
+                    ev.key = ev.orig
+                    if win.app.on_key(ev):
+                        return
             if k == 'esc' and win.modal_for is not None:
                 self.close(win)
             return
@@ -1266,6 +1374,10 @@ class WM:
     def handle_mouse(self, ev):
         now = time.monotonic()
         mx, my = ev.x, ev.y
+        if (mx, my) != self.mouse_pos:
+            self.mouse_pos = (mx, my)
+            if self.term.mice:
+                self.dirty = True
         if self.middle_scroll is not None:
             win = self.middle_scroll
             if ev.kind == 'drag':
@@ -1279,8 +1391,9 @@ class WM:
                     n += 1
                     if win.closed or not win.app:
                         continue
-                    rx = max(0, min(win.cw - 1, mx - win.x - 1))
-                    ry = max(0, min(win.ch - 1, my - win.y - 1))
+                    ox, oy = self.content_origin(win)
+                    rx = max(0, min(win.cw - 1, mx - ox))
+                    ry = max(0, min(win.ch - 1, my - oy))
                     win.app.on_mouse(Mouse(kind, rx, ry, 0, ev.mods))
                     self.middle_moved = True
                 if n:
@@ -1289,16 +1402,34 @@ class WM:
             if ev.kind == 'up':
                 self.middle_scroll = None
                 if not self.middle_moved and win.app and not win.closed:
-                    rx = max(0, min(win.cw - 1, mx - win.x - 1))
-                    ry = max(0, min(win.ch - 1, my - win.y - 1))
-                    win.app.on_mouse(Mouse('down', rx, ry, 1, ev.mods, ev.clicks))
+                    # a plain middle click: let the app use it (terminal paste, browser
+                    # "open in new window"), otherwise paste the clipboard like X11
+                    ox, oy = self.content_origin(win)
+                    rx = max(0, min(win.cw - 1, mx - ox))
+                    ry = max(0, min(win.ch - 1, my - oy))
+                    used = win.app.on_mouse(Mouse('down', rx, ry, 1, ev.mods, ev.clicks))
                     win.app.on_mouse(Mouse('up', rx, ry, 1, ev.mods, ev.clicks))
+                    if not used and self.clipboard and self.accepts_paste(win.app):
+                        win.app.on_paste(self.clipboard)
                 self.dirty = True
                 return
-        if (mx, my) != self.mouse_pos:
-            self.mouse_pos = (mx, my)
-            if self.term.mice:
+        if self.tsel and self.tsel['drag']:
+            if ev.kind == 'drag':
+                self.tsel['b'] = (mx, my)
                 self.dirty = True
+                return
+            if ev.kind == 'up':
+                self.tsel['drag'] = False
+                t = self.tsel_text()
+                if t and self.tsel['a'] != self.tsel['b']:
+                    self.copy_text(t)
+                else:
+                    self.tsel = None
+                self.dirty = True
+                return
+        if ev.kind == 'down' and self.tsel:
+            self.tsel = None
+            self.dirty = True
         if ev.kind == 'down':
             lt, lx, ly, lb = self.last_click
             if now - lt < DOUBLE_CLICK and (lx, ly, lb) == (mx, my, ev.button):
@@ -1382,10 +1513,20 @@ class WM:
                 self.middle_moved = False
                 self.dirty = True
                 return
+            if (ev.button == 0 and part == 'content' and win.app and 'shift' in ev.mods
+                    and not win.app.shift_select):
+                # Shift+drag: select any text on screen (like gpm), copied on release
+                self.tsel = {'win': win, 'a': (mx, my), 'b': (mx, my), 'drag': True,
+                             'block': 'ctrl' in ev.mods}      # Ctrl+Shift+drag: rectangle
+                self.dirty = True
+                return
             if part == 'content' and 'alt' not in ev.mods:
                 if win.app:
                     self.mouse_capture = win if ev.button == 0 else None
-                    win.app.on_mouse(ev.moved(win.x + 1, win.y + 1))
+                    npop = len(self.popups)
+                    used = win.app.on_mouse(ev.moved(win.x + 1, win.y + 1))
+                    if ev.button == 2 and not used and len(self.popups) == npop:
+                        self.edit_menu(win, mx, my)
             elif ev.button == 0:
                 if part == 'title' or 'alt' in ev.mods:
                     if ev.clicks >= 2 and part == 'title':
@@ -1585,9 +1726,11 @@ Alt+Shift+Arrows  resize           Ctrl+Alt+Arrows  move
 Alt+Enter         new terminal
 
 Hold the middle button and move the mouse/trackpoint to scroll the window
-under the pointer.  Terminal: drag to select and copy; Ctrl+Shift+V /
-Shift+Insert / middle click pastes.  monocell-clip prints or sets the shared
-clipboard in any shell.  KDE Connect (System menu): pair the phone, send or
+under the pointer.  Copy & paste: Shift+drag selects text in any window and
+copies it (Ctrl+Shift+drag: rectangle); in the terminal and editor a plain
+drag selects.  Ctrl+Shift+C copies, Ctrl+Shift+V / Shift+Insert / a middle
+click pastes - also on the Linux console.  Right-click shows Copy/Paste.
+monocell-clip prints or sets the shared clipboard in any shell.  KDE Connect (System menu): pair the phone, send or
 pull the clipboard, share files.  Browser: Ctrl+L address, Tab links, Enter
 opens, Ctrl+D bookmark, Ctrl+F find.  Music: Space plays, n/p next.
 """

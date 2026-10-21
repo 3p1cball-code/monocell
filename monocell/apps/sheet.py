@@ -202,6 +202,7 @@ class Sheet(App):
     icon = '[#]'
     size = (90, 26)
     min_size = (36, 8)
+    shift_select = True
 
     def __init__(self, wm, win, path=None, **kw):
         super().__init__(wm, win)

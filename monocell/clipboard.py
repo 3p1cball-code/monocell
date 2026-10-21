@@ -9,6 +9,13 @@ def path():
     return os.path.join(CACHE_DIR, 'clipboard')
 
 
+def mtime():
+    try:
+        return os.stat(path()).st_mtime_ns
+    except OSError:
+        return 0
+
+
 def load(limit=1_000_000):
     try:
         with open(path(), encoding='utf-8', errors='replace') as f:

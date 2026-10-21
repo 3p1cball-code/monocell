@@ -13,7 +13,9 @@ from ..textarea import TextArea
 from ..util import fit, shorten_path, which
 from ..widgets import button
 
-MODES = ['blend', 'pixel', 'grey', 'ascii', 'mono']
+MODES = ['blend', 'pixel', 'grey', 'mono']      # raster styles for the page view
+VIEWS = [('page', 'Page'), ('text', 'Text'), ('ascii', 'ASCII')]
+INVERT = bytes(255 - i for i in range(256))
 DITHERS = ['bayer4', 'bayer8', 'fs', 'none']
 
 
@@ -93,8 +95,8 @@ class PDF(App):
         self.info = {'pages': 0, 'title': '', 'page_w': 595.0, 'page_h': 842.0}
         self.page = 0
         self.mode = wm.cfg.get('image_mode', 'blend')
-        if self.mode == 'grey':
-            pass
+        if self.mode not in MODES:
+            self.mode = 'blend'
         self.dither = wm.cfg.get('dither', 'bayer4')
         self.fit_mode = 'page'
         self.zoom = 1.0
@@ -218,13 +220,17 @@ class PDF(App):
                 self.page_image(self.page)
             return
         cw, chh = self.target_cells()
-        key = (self.page, cw, chh, self.mode, self.dither, self.wm.cfg.get('ascii_charset'),
+        mode = 'ascii' if self.view == 'ascii' else self.mode
+        key = (self.page, cw, chh, mode, self.dither, self.wm.cfg.get('ascii_charset'),
                tuple(self.th.rgb))
         if key == self.cells_key and self.cells is not None:
             return
         self.cells_key = key
         rgb = img.scaled(cw, chh)
-        self.cells = imaging.render(self.wm, rgb, cw, chh, self.mode, self.dither)
+        if mode == 'ascii':
+            # ink becomes characters on the dark background (paper would be a wall of '$')
+            rgb = bytes(rgb).translate(INVERT)
+        self.cells = imaging.render(self.wm, rgb, cw, chh, mode, self.dither)
 
     # ------------------------------------------------------------ drawing
     def draw(self, cv, focused):
@@ -232,10 +238,15 @@ class PDF(App):
         w, h = cv.w, cv.h
         x = 0
         fit_label = 'Fit W' if self.fit_mode == 'width' else 'Fit P'
-        tools = [('Open', 'open'), ('<', 'prev'), ('>', 'next'), ('Page', 'goto'), ('-', 'zout'),
-                 ('+', 'zin'), (fit_label, 'fit'), ('Text' if self.view == 'page' else 'Page', 'view')]
-        if w >= 84:
-            tools += [(self.mode, 'mode'), (self.dither, 'dither')]
+        tools = [('Open', 'open'), ('<', 'prev'), ('>', 'next')]
+        tools += [(label, ('view', v)) for v, label in VIEWS]
+        tools += [('Go', 'goto')]
+        if self.view != 'text':
+            tools += [('-', 'zout'), ('+', 'zin'), (fit_label, 'fit')]
+        if self.view == 'page':
+            tools += [(self.mode, 'mode')]
+        if self.view != 'text':
+            tools += [(self.dither, 'dither')]
         for label, key in tools:
             if x + len(label) + 3 > w:
                 break
@@ -243,6 +254,10 @@ class PDF(App):
                 x += button(self, cv, x, 0, label, key, enabled=self.page > 0) + 1
             elif key == 'next':
                 x += button(self, cv, x, 0, label, key, enabled=self.page + 1 < self.info.get('pages', 0)) + 1
+            elif isinstance(key, tuple):
+                x += button(self, cv, x, 0, label, key, active=self.view == key[1]) + 1
+                if key[1] == 'ascii':
+                    x += 1           # small gap after the view switch
             else:
                 x += button(self, cv, x, 0, label, key) + 1
         # content
@@ -281,7 +296,7 @@ class PDF(App):
         # status
         left = shorten_path(self.path, max(12, w // 2))
         st = 'page %d/%d  %d%%  %s' % (self.page + 1, max(pages, 1), int(self.zoom * 100),
-                                       self.view if self.view == 'text' else 'cells')
+                                       dict(VIEWS)[self.view].lower())
         cv.put(0, h - 1, fit(left, w - len(st) - 2), th.c('dim', 'win'))
         cv.put(w - len(st), h - 1, st, th.c('text', 'win'))
 
@@ -352,12 +367,28 @@ class PDF(App):
         elif key == 'dither':
             self.dither = DITHERS[(DITHERS.index(self.dither) + 1) % len(DITHERS)] if self.dither in DITHERS else 'bayer4'
             self.cells_key = None
-        elif key == 'view' or key == 'text':
-            self.view = 'text' if self.view == 'page' else 'page'
-            if self.view == 'text':
-                self.load_text()
+        elif isinstance(key, tuple) and key[0] == 'view':
+            self.set_view(key[1])
+        elif key in ('view', 'text'):
+            self.set_view('page' if self.view == 'text' else 'text')
+
+    def set_view(self, view):
+        if view == self.view:
+            return
+        self.view = view
+        if view == 'text':
+            self.load_text()
+        else:
             self.text_page = None
-            self.cells_key = None
+        self.cells = None
+        self.cells_key = None
+        self.scroll = self.hscroll = 0
+        self.invalidate()
+
+    def selection_text(self):
+        if self.view == 'text' and self.textarea:
+            return self.textarea.selected_text() or ''
+        return ''
 
     def on_mouse(self, ev):
         g = getattr(self, 'sb', None)
@@ -381,6 +412,17 @@ class PDF(App):
             self.invalidate()
             return True
         k = self.zone_at(ev.x, ev.y)
+        if (self.view == 'text' and self.textarea and ev.button == 0
+                and (k == 'text' or ev.kind in ('drag', 'up'))
+                and ev.kind in ('down', 'drag', 'up', 'wheelup', 'wheeldown')):
+            # the text view selects with a plain drag, like the editor
+            self.textarea.mouse(ev, ev.x - 1, ev.y - 2)
+            if ev.kind == 'up':
+                t = self.textarea.selected_text()
+                if t:
+                    self.wm.set_clipboard(t)
+            self.invalidate()
+            return True
         if ev.kind in ('wheelup', 'wheeldown', 'drag') and k in ('page', 'text'):
             if self.view == 'text' and self.textarea:
                 self.textarea.mouse(ev, ev.x, ev.y - 2)
@@ -421,7 +463,16 @@ class PDF(App):
         elif k == 'd':
             self.on_click('dither', None)
         elif k == 't':
-            self.on_click('view', None)
+            self.set_view('page' if self.view == 'text' else 'text')
+        elif k == 'a':
+            self.set_view('page' if self.view == 'ascii' else 'ascii')
+        elif k == 'v':
+            order = [v for v, _ in VIEWS]
+            self.set_view(order[(order.index(self.view) + 1) % len(order)])
+        elif k in ('ctrl+c', 'ctrl+shift+c') and self.view == 'text' and self.textarea:
+            self.wm.copy_text(self.textarea.selected_text() or '')
+        elif k == 'ctrl+a' and self.view == 'text' and self.textarea:
+            self.textarea.key(ev)
         elif k == 'g':
             self.on_click('goto', None)
         elif k == 'ctrl+o' or k == 'o':

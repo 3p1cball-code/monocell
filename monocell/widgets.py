@@ -213,6 +213,16 @@ class TextField:
         elif k == 'enter':
             if self.on_enter:
                 self.on_enter(self.text)
+        elif k in ('ctrl+v', 'ctrl+shift+v', 'shift+insert'):
+            from . import clipboard
+            text = clipboard.load()
+            if text:
+                if self.sel_all:
+                    self.text, self.cur, self.sel_all = '', 0, False
+                self.insert(text.strip('\n'))
+        elif k in ('ctrl+c', 'ctrl+shift+c', 'ctrl+insert') and self.text and not self.password:
+            from . import clipboard
+            clipboard.save(self.text)
         elif k.startswith('ctrl+') or k.startswith('alt+') or k in ('up', 'down', 'tab', 'esc'):
             pass
         else:

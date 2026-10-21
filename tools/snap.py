@@ -7,7 +7,7 @@ usage: snap.py COLSxROWS "script" [--args "--open files"] [--out DIR] [--font PA
 
 script: actions separated by ';'
   wait S | key NAME | type TEXT | click X Y | rclick X Y | dclick X Y
-  drag X1 Y1 X2 Y2 | mdrag X1 Y1 X2 Y2 | mclick X Y | move X Y | wheel up|down X Y | shot NAME | paste TEXT
+  drag X1 Y1 X2 Y2 | mdrag X1 Y1 X2 Y2 | sdrag X1 Y1 X2 Y2 (shift) | mclick X Y | move X Y | wheel up|down X Y | shot NAME | paste TEXT
 """
 import argparse
 import os
@@ -221,7 +221,7 @@ def main():
             parts = step.split(' ', 1)
             cmd = parts[0]
             arg = parts[1] if len(parts) > 1 else ''
-            nums = [int(v) for v in arg.split()] if cmd in ('click', 'rclick', 'dclick', 'mclick', 'drag', 'mdrag', 'move', 'down', 'up') else []
+            nums = [int(v) for v in arg.split()] if cmd in ('click', 'rclick', 'dclick', 'mclick', 'drag', 'mdrag', 'sdrag', 'move', 'down', 'up') else []
             if cmd == 'wait':
                 time.sleep(float(arg))
             elif cmd == 'key':
@@ -259,9 +259,9 @@ def main():
                 r.mouse('up', nums[0], nums[1])
             elif cmd == 'move':
                 r.mouse('move', nums[0], nums[1])
-            elif cmd in ('drag', 'mdrag'):
+            elif cmd in ('drag', 'mdrag', 'sdrag'):
                 x1, y1, x2, y2 = nums
-                b = 0 if cmd == 'drag' else 1
+                b = {'drag': 0, 'mdrag': 1, 'sdrag': 4}[cmd]
                 r.mouse('down', x1, y1, b)
                 steps = max(abs(x2 - x1), abs(y2 - y1), 1)
                 for i in range(1, steps + 1):

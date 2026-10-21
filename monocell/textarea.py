@@ -129,6 +129,7 @@ class TextArea:
             return
         self.snapshot(kind if len(s) == 1 else 'other')
         self.delete_selection()
+        self.anchor = None        # a click leaves anchor == cursor; typing must not select
         s = s.replace('\r\n', '\n').replace('\r', '\n')
         line = self.lines[self.cy]
         before, after = line[:self.cx], line[self.cx:]

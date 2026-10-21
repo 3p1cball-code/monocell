@@ -51,7 +51,11 @@ def main(argv=None):
             wm.handle(ev)
 
     def on_mice(fd):
-        for ev in term.mice.read():
+        evs = term.mice.read()
+        mods = term.vt_mods() if evs else frozenset()
+        for ev in evs:
+            if mods:
+                ev.mods = mods
             wm.handle(ev)
 
     def idle():

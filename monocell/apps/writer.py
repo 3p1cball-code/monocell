@@ -151,6 +151,7 @@ class Writer(App):
     icon = '[W]'
     size = (84, 28)
     min_size = (34, 8)
+    shift_select = True
 
     def __init__(self, wm, win, path=None, **kw):
         super().__init__(wm, win)
@@ -392,6 +393,9 @@ class Writer(App):
         self.update_title()
         self.invalidate()
         return True
+
+    def selection_text(self):
+        return self.ta.selected_text() or ''
 
     def on_paste(self, text):
         self.ta.insert(text, 'other')

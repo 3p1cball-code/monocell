@@ -30,6 +30,7 @@ class Editor(App):
     icon = '[=]'
     size = (84, 26)
     min_size = (30, 6)
+    shift_select = True
 
     def __init__(self, wm, win, path=None, text=None, pdf=False, **kw):
         super().__init__(wm, win)
@@ -332,6 +333,9 @@ class Editor(App):
         self.update_title()
         self.invalidate()
         return True
+
+    def selection_text(self):
+        return self.ta.selected_text() or ''
 
     def on_paste(self, text):
         if self.findbar and self.find_focus < 2:

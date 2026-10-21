@@ -20,6 +20,7 @@ class Terminal(App):
     icon = '>_ '
     size = (84, 24)
     min_size = (20, 4)
+    shift_select = True
 
     def __init__(self, wm, win, cmd=None, cwd=None, title=None, close_on_exit=True, env=None, **kw):
         super().__init__(wm, win)
@@ -233,6 +234,9 @@ class Terminal(App):
                 b = c1 if li == l1 else len(t)
                 out.append(t[a:b].rstrip())
         return '\n'.join(out)
+
+    def selection_text(self):
+        return self.selected_text() if self.sel else ''
 
     def on_key(self, ev):
         if self.exited is not None:
