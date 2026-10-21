@@ -89,6 +89,7 @@ DEFAULT_CONFIG = {
     'opencode_cmd': 'opencode',
     'opencode_host': '',
     'opencode_workdir': '',
+    'kdeconnect_display': ':99',
     'color_mode': 'auto',         # auto | truecolor | palette | linux | ansi
     'bookmarks': [['Wikipedia', 'https://en.wikipedia.org'],
                   ['Hacker News', 'https://news.ycombinator.com'],

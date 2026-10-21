@@ -52,6 +52,7 @@ OPTIONS = {
         ('opencode_cmd', 'opencode command', 'text'),
         ('opencode_host', 'Run over SSH on host (empty = local)', 'text'),
         ('opencode_workdir', 'Working directory (empty = home)', 'text'),
+        ('kdeconnect_display', 'KDE Connect headless X display', 'text'),
     ],
 }
 

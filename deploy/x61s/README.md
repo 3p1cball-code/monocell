@@ -30,10 +30,10 @@ Autostart-Block werden entfernt, danach werden die monocell-Systemdateien normal
 installiert.
 
 ```sh
-sudo ~/monocell-src/deploy/x61s/upgrade-from-textwin.sh --user ariedel
+sudo ~/monocell-src/deploy/x61s/upgrade-from-textwin.sh --user ariedel --kdeconnect
 ```
 
-Danach neu starten und im GRUB-Menü **„monocell (text console)“** wählen (oder den
+Danach neu starten und im GRUB-Menü **„MONOCELL - TUI“** wählen (oder den
 normalen Eintrag nehmen). `--keep-old` behält `/opt/textwin`, `--no-grub` lässt den
 GRUB-Teil aus.
 
@@ -78,7 +78,7 @@ Das Skript legt `monocell.target` an (Text-Login auf tty1; monocell startet nach
 Anmeldung), klont den GRUB-Eintrag des **laufenden Kernels** und hängt
 `systemd.unit=monocell.target` an, macht das GRUB-Menü sichtbar (Timeout 5 s, Backup
 unter `/etc/default/grub.bak-monocell`) und ruft `update-grub` auf. Der normale grafische
-Eintrag bleibt Standard – im GRUB-Menü **„monocell (text console)“** wählen, um in die
+Eintrag bleibt Standard – im GRUB-Menü **„MONOCELL - TUI“** wählen, um in die
 Text-Anmeldung zu booten.
 
 Nach einem Kernel-Update das Skript erneut ausführen (der Eintrag zeigt auf den beim
@@ -120,6 +120,27 @@ monocell --open pdf /usr/share/doc/...pdf
 ```sh
 sudo ~/monocell/deploy/x61s/install-vt.sh --uninstall --tty 2
 sudo systemctl set-default graphical.target   # falls --no-desktop genutzt wurde
+```
+
+## KDE Connect und Zwischenablage
+
+Auf der Konsole gibt es keine System-Zwischenablage. Für den Austausch mit dem Handy
+startet `install-kdeconnect.sh` ein headless Xvfb (`:99`) und den KDE-Connect-Daemon:
+
+```sh
+sudo ~/monocell/deploy/x61s/install-kdeconnect.sh --user ariedel
+```
+
+Danach in Monocell **System → KDE Connect** öffnen, mit `P` pairen (am Handy bestätigen)
+und dort das Clipboard-Plugin aktivieren. `V` holt die Handy-Zwischenablage nach
+Monocell, `S` schickt die Monocell-Zwischenablage ans Handy. Neu empfangene Dateien aus
+`~/Downloads` lassen sich mit `N` direkt in die Zwischenablage laden.
+
+In jeder Shell (auch tty2/tty3) liest und schreibt `monocell-clip` dieselbe Ablage:
+
+```sh
+monocell-clip                 # ausgeben
+monocell-clip --set < datei   # setzen
 ```
 
 ## Grenzen / Hinweise

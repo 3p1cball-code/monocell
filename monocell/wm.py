@@ -7,6 +7,7 @@ import subprocess
 import time
 import traceback
 
+from . import clipboard as clip
 from .app import REGISTRY, load_app
 from .screen import Canvas
 from .term import Key, Mouse, Paste
@@ -281,7 +282,11 @@ class WM:
         self.hover_part = None
         self.mouse_pos = (-1, -1)
         self.snap_preview = None
-        self.clipboard = ''
+        self.clipboard = clip.load()
+        self.middle_scroll = None
+        self.middle_last = (0, 0)
+        self.middle_acc = 0.0
+        self.middle_moved = False
         self.hostname = (os.environ.get('MONOCELL_HOSTNAME')
                          or socket.gethostname().split('.')[0])
         self.battery = None
@@ -598,6 +603,7 @@ class WM:
 
     def set_clipboard(self, text):
         self.clipboard = text
+        clip.save(text)
         if self.term.mode != 'linux' and len(text) < 100000:
             try:
                 self.term.write('\x1b]52;c;%s\x07' % base64.b64encode(text.encode()).decode())
@@ -1260,6 +1266,35 @@ class WM:
     def handle_mouse(self, ev):
         now = time.monotonic()
         mx, my = ev.x, ev.y
+        if self.middle_scroll is not None:
+            win = self.middle_scroll
+            if ev.kind == 'drag':
+                self.middle_acc += ev.y - self.middle_last[1]
+                self.middle_acc = max(-8.0, min(8.0, self.middle_acc))
+                self.middle_last = (mx, my)
+                n = 0
+                while abs(self.middle_acc) >= 1.0 and n < 4:
+                    kind = 'wheeldown' if self.middle_acc > 0 else 'wheelup'
+                    self.middle_acc -= 1.0 if self.middle_acc > 0 else -1.0
+                    n += 1
+                    if win.closed or not win.app:
+                        continue
+                    rx = max(0, min(win.cw - 1, mx - win.x - 1))
+                    ry = max(0, min(win.ch - 1, my - win.y - 1))
+                    win.app.on_mouse(Mouse(kind, rx, ry, 0, ev.mods))
+                    self.middle_moved = True
+                if n:
+                    self.dirty = True
+                return
+            if ev.kind == 'up':
+                self.middle_scroll = None
+                if not self.middle_moved and win.app and not win.closed:
+                    rx = max(0, min(win.cw - 1, mx - win.x - 1))
+                    ry = max(0, min(win.ch - 1, my - win.y - 1))
+                    win.app.on_mouse(Mouse('down', rx, ry, 1, ev.mods, ev.clicks))
+                    win.app.on_mouse(Mouse('up', rx, ry, 1, ev.mods, ev.clicks))
+                self.dirty = True
+                return
         if (mx, my) != self.mouse_pos:
             self.mouse_pos = (mx, my)
             if self.term.mice:
@@ -1340,6 +1375,13 @@ class WM:
         if ev.kind == 'down':
             if win is not self.focus or self.windows[-1] is not win:
                 self.activate(win)
+            if ev.button == 1 and part == 'content' and win.app and 'alt' not in ev.mods:
+                self.middle_scroll = win
+                self.middle_last = (mx, my)
+                self.middle_acc = 0.0
+                self.middle_moved = False
+                self.dirty = True
+                return
             if part == 'content' and 'alt' not in ev.mods:
                 if win.app:
                     self.mouse_capture = win if ev.button == 0 else None
@@ -1542,6 +1584,10 @@ Alt+Left/Right    snap half        Alt+T  tile all
 Alt+Shift+Arrows  resize           Ctrl+Alt+Arrows  move
 Alt+Enter         new terminal
 
-Terminal: drag to select and copy, Ctrl+Shift+V / Shift+Insert / middle
-click pastes.  Browser: Ctrl+L address, Tab links, Enter opens, Ctrl+D
-bookmark, Ctrl+F find.  Music: Space plays, n/p next/previous."""
+Hold the middle button and move the mouse/trackpoint to scroll the window
+under the pointer.  Terminal: drag to select and copy; Ctrl+Shift+V /
+Shift+Insert / middle click pastes.  monocell-clip prints or sets the shared
+clipboard in any shell.  KDE Connect (System menu): pair the phone, send or
+pull the clipboard, share files.  Browser: Ctrl+L address, Tab links, Enter
+opens, Ctrl+D bookmark, Ctrl+F find.  Music: Space plays, n/p next.
+"""

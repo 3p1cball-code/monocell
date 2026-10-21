@@ -7,7 +7,7 @@ usage: snap.py COLSxROWS "script" [--args "--open files"] [--out DIR] [--font PA
 
 script: actions separated by ';'
   wait S | key NAME | type TEXT | click X Y | rclick X Y | dclick X Y
-  drag X1 Y1 X2 Y2 | move X Y | wheel up|down X Y | shot NAME | paste TEXT
+  drag X1 Y1 X2 Y2 | mdrag X1 Y1 X2 Y2 | mclick X Y | move X Y | wheel up|down X Y | shot NAME | paste TEXT
 """
 import argparse
 import os
@@ -221,7 +221,7 @@ def main():
             parts = step.split(' ', 1)
             cmd = parts[0]
             arg = parts[1] if len(parts) > 1 else ''
-            nums = [int(v) for v in arg.split()] if cmd in ('click', 'rclick', 'dclick', 'drag', 'move', 'down', 'up') else []
+            nums = [int(v) for v in arg.split()] if cmd in ('click', 'rclick', 'dclick', 'mclick', 'drag', 'mdrag', 'move', 'down', 'up') else []
             if cmd == 'wait':
                 time.sleep(float(arg))
             elif cmd == 'key':
@@ -239,6 +239,10 @@ def main():
                 r.mouse('down', nums[0], nums[1])
                 time.sleep(0.03)
                 r.mouse('up', nums[0], nums[1])
+            elif cmd == 'mclick':
+                r.mouse('down', nums[0], nums[1], 1)
+                time.sleep(0.03)
+                r.mouse('up', nums[0], nums[1], 1)
             elif cmd == 'dclick':
                 for _ in range(2):
                     r.mouse('down', nums[0], nums[1])
@@ -255,15 +259,16 @@ def main():
                 r.mouse('up', nums[0], nums[1])
             elif cmd == 'move':
                 r.mouse('move', nums[0], nums[1])
-            elif cmd == 'drag':
+            elif cmd in ('drag', 'mdrag'):
                 x1, y1, x2, y2 = nums
-                r.mouse('down', x1, y1)
+                b = 0 if cmd == 'drag' else 1
+                r.mouse('down', x1, y1, b)
                 steps = max(abs(x2 - x1), abs(y2 - y1), 1)
                 for i in range(1, steps + 1):
                     time.sleep(0.01)
-                    r.mouse('drag', x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
+                    r.mouse('drag', x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps, b)
                 time.sleep(0.05)
-                r.mouse('up', x2, y2)
+                r.mouse('up', x2, y2, b)
             elif cmd == 'wheel':
                 d, x, y = arg.split()
                 r.mouse('wheel' + d, int(x), int(y))

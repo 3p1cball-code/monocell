@@ -63,9 +63,9 @@ fi
 sed -i 's/^GRUB_HIDDEN_TIMEOUT=/#GRUB_HIDDEN_TIMEOUT=/' /etc/default/grub || true
 
 update-grub
-grep -q "monocell (text console)" /boot/grub/grub.cfg || { echo "entry missing after update-grub" >&2; exit 1; }
+grep -q "MONOCELL - TUI" /boot/grub/grub.cfg || { echo "entry missing after update-grub" >&2; exit 1; }
 echo
-echo "GRUB entry installed: \"monocell (text console)\""
+echo "GRUB entry installed: \"MONOCELL - TUI\""
 echo "At boot, select it for a text login on tty1 (fingerprint or password);"
 echo "monocell starts from ~/.profile after login (see install-login.sh)."
 echo "Default boot is unchanged. Re-run after a kernel update."

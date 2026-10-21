@@ -13,6 +13,11 @@ cat > "$BIN/monocell" <<LAUNCH
 PYTHONPATH="$SHARE\${PYTHONPATH:+:\$PYTHONPATH}" exec python3 -m monocell "\$@"
 LAUNCH
 chmod +x "$BIN/monocell"
+cat > "$BIN/monocell-clip" <<CLIP
+#!/bin/sh
+PYTHONPATH="$SHARE\${PYTHONPATH:+:\$PYTHONPATH}" exec python3 -m monocell.clipboard "\$@"
+CLIP
+chmod +x "$BIN/monocell-clip"
 cat > "$PREFIX/share/applications/monocell.desktop" <<DESK
 [Desktop Entry]
 Type=Application
@@ -67,3 +72,4 @@ cat > "$PREFIX/share/icons/hicolor/scalable/apps/monocell.svg" <<'SVG'
 SVG
 echo "installed: $BIN/monocell"
 echo "start from a terminal: monocell   (or from the application menu)"
+echo "clipboard in a shell: monocell-clip   (or: monocell-clip --set < file)"

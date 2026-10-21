@@ -152,6 +152,7 @@ REGISTRY = [
     ('youtube', 'youtube', 'YouTube', '[Y]', 'Search & play YouTube', 'Media'),
     ('music', 'music', 'Music', '(~)', 'Music player', 'Media'),
     ('system', 'system', 'System', '[i]', 'System monitor', 'System'),
+    ('kdeconnect', 'kdeconnect', 'KDE Connect', '[K]', 'Clipboard & file transfer', 'System'),
     ('settings', 'settings', 'Settings', '{o}', 'Settings', 'System'),
     ('opencode', 'opencode', 'opencode', '[O]', 'Agent TUI in a terminal', 'Tools'),
     ('tailscale', 'tailscale', 'Tailscale', '[T]', 'Tailnet status & connect', 'Tools'),

@@ -21,7 +21,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--cfg', default='/boot/grub/grub.cfg')
     ap.add_argument('--kernel', default='')
-    ap.add_argument('--name', default='monocell (text console)')
+    ap.add_argument('--name', default='MONOCELL - TUI')
     a = ap.parse_args()
     krel = a.kernel
     try:

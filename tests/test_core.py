@@ -330,6 +330,23 @@ class TestLogo(unittest.TestCase):
         self.assertEqual((w, h), (96, 11))
 
 
+class TestKDEConnect(unittest.TestCase):
+    def test_parse_devices(self):
+        from monocell.apps.kdeconnect import parse_devices
+        out = ("- Pixel 9: abc_123 on 192.168.1.8 via LAN (paired and reachable)\n"
+               "- laptop: def456 (paired)\n"
+               "- unknown: xyz (unpaired)\n"
+               "4 devices found\n")
+        d = parse_devices(out)
+        self.assertEqual(len(d), 3)
+        self.assertEqual(d[0]['name'], 'Pixel 9')
+        self.assertEqual(d[0]['id'], 'abc_123')
+        self.assertTrue(d[0]['reachable'])
+        self.assertTrue(d[1]['paired'])
+        self.assertFalse(d[1]['reachable'])
+        self.assertFalse(d[2]['paired'])
+
+
 class TestWebParse(unittest.TestCase):
     def test_layout_table_rows(self):
         from monocell import web

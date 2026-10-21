@@ -40,6 +40,8 @@ Voraussetzungen: Python ≥ 3.9, ein UTF-8-fähiges Terminal. Optional, aber emp
 Maus: Titelleiste ziehen = verschieben, an den Rand ziehen = andocken (oben = maximieren,
 links/rechts = halbe Breite, Ecke = Viertel), Kanten/Ecken ziehen = Größe ändern,
 Doppelklick auf den Titel = maximieren, Rechtsklick auf Titel/Taskleiste/Desktop = Menü.
+**Mittlere Maustaste halten und ziehen** (auch mit dem Trackpoint) scrollt das Fenster
+unter dem Zeiger – im Terminal durch den Scrollback, in Listen und Seiten.
 
 | Taste | Wirkung |
 |---|---|
@@ -60,6 +62,19 @@ Die Apps haben eigene Tasten (im Editor `Ctrl+S/O/F`, im Browser `Ctrl+L`, `Tab`
 `Alt+←`, `Ctrl+D`, `Ctrl+F`, in der Musik `Leertaste`, `n`/`p`, `←`/`→`, …).
 `Hilfe & Tastenkürzel` im Startmenü zeigt das Wichtigste.
 
+### Zwischenablage
+
+Monocell hält eine gemeinsame Zwischenablage (auch über Sitzungen hinweg) in
+`~/.cache/monocell/clipboard`. In modernen Terminals geht sie zusätzlich per OSC 52 an
+die System-Zwischenablage. Auf der Linux-Konsole gibt es keine System-Zwischenablage –
+dort dient das kleine CLI als Brücke:
+
+```sh
+monocell-clip                 # Inhalt ausgeben, z. B. $(monocell-clip)
+monocell-clip --set < datei   # Inhalt setzen
+monocell-clip --clear
+```
+
 ## Anwendungen
 
 * **Dateien** – navigieren, kopieren/ausschneiden/einfügen, umbenennen, Papierkorb
@@ -72,11 +87,15 @@ Die Apps haben eigene Tasten (im Editor `Ctrl+S/O/F`, im Browser `Ctrl+L`, `Tab`
   lite-Engine eine reine JavaScript-Seite, weist sie darauf hin, auf Chromium zu wechseln.
 * **Terminal** – eigener VT100/xterm-Emulator (Farben, Alternativbildschirm, Maus,
   Bracketed Paste, Scrollback, Kopieren per Ziehen) auf einer echten PTY; vim, top, less
-  laufen darin.
+  laufen darin. `Ctrl+Shift+C` kopiert, `Ctrl+Shift+V`/`Shift+Insert`/Mittelklick fügt ein.
 * **opencode** – öffnet die opencode-TUI in einem Terminalfenster. Standard ist die
   lokale Installation; mit `user@host` unter Einstellungen → Tools läuft sie stattdessen
   per SSH auf einem anderen Rechner. Schlägt die Verbindung fehl, startet lokal
   `opencode`.
+* **KDE Connect** – Geräte, Pairing, Ping/Ring, Dateien teilen und die Zwischenablage
+  in beide Richtungen. Auf einem reinen Text-Terminal läuft dafür ein headless Xvfb
+  (`deploy/x61s/install-kdeconnect.sh`); sonst liest die App neu empfangene Dateien aus
+  `~/Downloads` in die Zwischenablage.
 * **Tailscale** – Status, eigene IPs, Peers (online/offline, Exit-Node) und
   Connect/Disconnect (`tailscale up/down`). Der Deploy richtet den Operator ein, damit
   das ohne Root funktioniert.
@@ -246,10 +265,12 @@ sudo deploy/x61s/install-vt.sh --user ariedel      # Dienst auf tty2
 ```
 
 `--no-desktop` stellt auf `multi-user.target` um und deaktiviert den Displaymanager
-(Rollback wird angezeigt). Ein **alternativer GRUB-Eintrag** („monocell (text console)“)
+(Rollback wird angezeigt). Ein **alternativer GRUB-Eintrag** („MONOCELL - TUI“)
 bootet in eine **Text-Anmeldung** (Fingerprint/Passwort) und startet danach monocell,
 ohne den Standard-Boot zu ändern: `sudo deploy/x61s/install-grub-entry.sh`, danach
-`sudo deploy/x61s/install-login.sh --user NAME`. `--lowmem` (in der Session automatisch) schaltet nur die Performance-Regler:
+`sudo deploy/x61s/install-login.sh --user NAME`. Für die Zwischenablage per Handy:
+`sudo deploy/x61s/install-kdeconnect.sh --user NAME` (installiert KDE Connect, Xvfb
+und xclip). `--lowmem` (in der Session automatisch) schaltet nur die Performance-Regler:
 keine Fenster-Schatten und Video mit 10 fps; Aussehen, Bildmodus und Web-Engine
 bleiben deine Einstellungen.
 Details, Maus-/Tastaturhinweise und Deinstallation: `deploy/x61s/README.md`.

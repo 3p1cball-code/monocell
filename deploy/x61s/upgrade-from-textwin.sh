@@ -4,18 +4,20 @@
 # normal monocell system install.
 #
 # Run as root on the target, from a checkout of the new tree:
-#   sudo deploy/x61s/upgrade-from-textwin.sh --user ariedel [--no-apt] [--keep-old] [--no-grub]
+#   sudo deploy/x61s/upgrade-from-textwin.sh --user ariedel [--kdeconnect] [--no-apt] [--keep-old] [--no-grub]
 set -eu
 USER_NAME=${SUDO_USER:-}
 NO_APT=0
 KEEP_OLD=0
 DO_GRUB=1
+KDE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --user) USER_NAME=$2; shift 2 ;;
         --no-apt) NO_APT=1; shift ;;
         --keep-old) KEEP_OLD=1; shift ;;
         --no-grub) DO_GRUB=0; shift ;;
+        --kdeconnect) KDE=1; shift ;;
         -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
     esac
@@ -64,6 +66,17 @@ else
     "$SRC/deploy/x61s/install-login.sh" --user "$USER_NAME"
 fi
 
+if [ "$KDE" = 1 ]; then
+    echo "--- installing KDE Connect (headless clipboard bridge)"
+    if [ "$NO_APT" = 1 ]; then
+        "$SRC/deploy/x61s/install-kdeconnect.sh" --user "$USER_NAME" --no-apt \
+            || echo "warning: KDE Connect setup failed (run deploy/x61s/install-kdeconnect.sh later)" >&2
+    else
+        "$SRC/deploy/x61s/install-kdeconnect.sh" --user "$USER_NAME" \
+            || echo "warning: KDE Connect setup failed (run deploy/x61s/install-kdeconnect.sh later)" >&2
+    fi
+fi
+
 if [ "$DO_GRUB" = 1 ]; then
     echo "--- rewriting the alternate GRUB entry"
     "$SRC/deploy/x61s/install-grub-entry.sh"
@@ -76,5 +89,5 @@ fi
 
 echo
 echo "Upgrade complete. The text login now starts monocell; tty2/3 stay plain shells."
-echo "The old GRUB entry is gone. Reboot and pick \"monocell (text console)\" if you want"
+echo "The old GRUB entry is gone. Reboot and pick \"MONOCELL - TUI\" if you want"
 echo "the text-login boot, otherwise the normal entry is unchanged."
