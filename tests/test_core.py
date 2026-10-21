@@ -330,6 +330,45 @@ class TestLogo(unittest.TestCase):
         self.assertEqual((w, h), (96, 11))
 
 
+class TestTextShot(unittest.TestCase):
+    def make(self):
+        from monocell import shot
+        b = Buffer(6, 3)
+        b.ch[0] = list('ab  cd')
+        b.at[0] = [A(1, 8)] * 2 + [A(14, 0)] * 2 + [A(9, 0)] * 2
+        b.ch[1] = list('```x  ')
+        b.at[1] = [A(12, 9)] * 6
+        b.ch[2] = list('      ')
+        b.at[2] = [A(3, 3)] + [A(0, 8)] * 5   # equal fg/bg -> block
+        pal = ['%02x%02x%02x' % (i * 16, i * 8, i * 4) for i in range(16)]
+        return shot, b, pal
+
+    def test_colours_and_fence(self):
+        shot, b, pal = self.make()
+        md = shot.markdown(b, pal, 'Ember', 'x61s', '1.0.0',
+                           when=__import__('datetime').datetime(2026, 10, 22, 1, 2, 3))
+        self.assertIn('\x1b[38;2;16;8;4m\x1b[48;2;128;64;32mab', md)   # slot 1 on 8
+        self.assertIn('\x1b[38;2;144;72;36m\x1b[48;2;0;0;0mcd\x1b[0m', md)
+        self.assertIn('````ansi', md)                    # four because of the ``` cells
+        self.assertIn('````text', md)
+        self.assertIn('\n#\n', md)                       # colour block in the plain copy
+        self.assertIn('`0 #000000`', md)
+        self.assertIn('#f0783c', md)
+        self.assertIn('# Monocell screenshot — 2026-10-22 01:02:03', md)
+
+    def test_save_file(self):
+        import tempfile, os, datetime
+        shot, b, pal = self.make()
+        with tempfile.TemporaryDirectory() as d:
+            path, size = shot.save(b, pal, 'Ember', 'x61s', '1.0.0', d,
+                                   when=datetime.datetime(2026, 10, 22, 1, 2, 3))
+            self.assertTrue(path.endswith('monocell-20261022-010203.md'))
+            self.assertTrue(os.path.isfile(path))
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            self.assertGreater(size, 100)
+            self.assertIn('\x1b[38;2;16;8;4m', open(path, encoding='utf-8').read())
+
+
 class TestVTModifiers(unittest.TestCase):
     def test_state_bits(self):
         from monocell.term import vt_state_mods

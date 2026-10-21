@@ -53,6 +53,7 @@ OPTIONS = {
         ('opencode_host', 'Run over SSH on host (empty = local)', 'text'),
         ('opencode_workdir', 'Working directory (empty = home)', 'text'),
         ('kdeconnect_display', 'KDE Connect headless X display', 'text'),
+        ('shot_dir', 'Text screenshot folder', 'text'),
     ],
 }
 

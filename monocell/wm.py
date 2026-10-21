@@ -133,7 +133,8 @@ class StartMenu:
                 last = cat
             out.append(('app', name, label, icon, desc))
         out.append(('sep',))
-        out += [('foot', 'help', 'Help & shortcuts'), ('foot', 'exit', 'Exit monocell'),
+        out += [('foot', 'help', 'Help & shortcuts'), ('foot', 'screenshot', 'Text screenshot'),
+                ('foot', 'exit', 'Exit monocell'),
                 ('foot', 'reboot', 'Reboot'), ('foot', 'shutdown', 'Shut down')]
         return out
 
@@ -202,7 +203,8 @@ class StartMenu:
                 on = idx == cur
                 a = th.c('on_accent', 'accent') if on else th.c('text', 'menu')
                 cv.fill(x + 1, ry, w - 1, 1, a)
-                icon = {'help': ' ? ', 'exit': ' x ', 'reboot': ' ^ ', 'shutdown': ' v '}[r[1]]
+                icon = {'help': ' ? ', 'screenshot': ' * ', 'exit': ' x ',
+                        'reboot': ' ^ ', 'shutdown': ' v '}[r[1]]
                 cv.put(x + 2, ry, icon, a if on else th.c('accent', 'menu'))
                 cv.put(x + 7, ry, r[2], a)
         if len(rows) > self.avail:
@@ -221,6 +223,8 @@ class StartMenu:
             self.wm.confirm_exit()
         elif r[1] == 'help':
             self.wm.show_help()
+        elif r[1] == 'screenshot':
+            self.wm.save_text_shot()
         elif r[1] == 'reboot':
             self.wm.confirm_reboot()
         elif r[1] == 'shutdown':
@@ -605,6 +609,19 @@ class WM:
         self.toasts = self.toasts[-4:]
         self.dirty = True
 
+    def save_text_shot(self):
+        from . import __version__, shot
+        buf = self.term.front or self.term.back
+        if not buf:
+            return
+        try:
+            path, size = shot.save(buf, self.cfg['palette'], self.cfg.get('preset', 'Custom'),
+                                   self.hostname, __version__, self.cfg.get('shot_dir'))
+        except OSError as e:
+            self.toast('Screenshot failed: %s' % e, 'red')
+            return
+        self.toast('Saved %s (%d KB)' % (os.path.basename(path), max(1, size // 1024)))
+
     def copy_text(self, text):
         if not text:
             self.toast('Nothing selected - Shift+drag selects text', 'yellow')
@@ -828,9 +845,10 @@ class WM:
 
         def work():
             img = imaging.load(path, 1400)
-            return imaging.render_cover(self, img, w, max(1, h - 1),
+            # fill the whole desktop: the taskbar is outside desk_h, so h rows, not h-1
+            return imaging.render_cover(self, img, w, max(1, h),
                                         self.cfg.get('image_mode', 'blend'), 1.0, 1.0,
-                                        self.cfg.get('dither', 'bayer4'), False), w, max(1, h - 1)
+                                        self.cfg.get('dither', 'bayer4'), False), w, max(1, h)
 
         def done(res):
             if self.wp_key != key:
@@ -1032,8 +1050,6 @@ class WM:
         if mode == 'image' and self.wallpaper_cells:
             cells, ww, wh = self.wallpaper_cells
             cv.sub(0, self.desk_y, self.w, self.desk_h).blit_cells(0, 0, cells)
-            if self.cfg['desktop_logo'] and self.desk_h > 16 and self.w > 50:
-                cv.put(2, self.desk_y + self.desk_h - 3, 'monocell', th.c('desk_fg', 'shadow'))
             return
         if mode == 'matrix':
             if self.rain is None:
@@ -1280,6 +1296,9 @@ class WM:
         self.dirty = True
         if k in ('f12', 'alt+ ', 'ctrl+alt+space', 'alt+ctrl+space'):
             self.toggle_start()
+            return
+        if k == 'alt+s':
+            self.save_text_shot()
             return
         if self.popups:
             p = self.popups[-1]
@@ -1696,6 +1715,7 @@ class WM:
             MenuItem('Cascade windows', self.cascade, '', '//'),
             MenuItem('Show desktop', self.show_desktop, 'Alt+D', '__'),
             None,
+            MenuItem('Text screenshot', self.save_text_shot, 'Alt+S', '*'),
             MenuItem('Settings', lambda: self.open('settings'), '', sym('settings', '{o}')),
         ]
         self.menu(items, mx, my)
@@ -1723,7 +1743,7 @@ Alt+Q             close window     Alt+H  minimize
 Alt+M / F11       maximize         Alt+D  show desktop
 Alt+Left/Right    snap half        Alt+T  tile all
 Alt+Shift+Arrows  resize           Ctrl+Alt+Arrows  move
-Alt+Enter         new terminal
+Alt+Enter         new terminal     Alt+S  text screenshot (.md)
 
 Hold the middle button and move the mouse/trackpoint to scroll the window
 under the pointer.  Copy & paste: Shift+drag selects text in any window and

@@ -35,7 +35,7 @@ PRESETS = {
 
 ROLE_DEFAULTS = {
     'desk': 8, 'desk_fg': 11, 'shadow': 0, 'win': 9, 'title': 10, 'raised': 10,
-    'sel': 11, 'field': 8, 'bar': 0, 'menu': 10,
+    'sel': 11, 'field': 8, 'bar': 10, 'menu': 10,
     'text': 12, 'dim': 7, 'bright': 13, 'accent': 14, 'accent2': 15, 'on_accent': 0,
     'cursor': 6,
     'red': 1, 'green': 2, 'yellow': 3, 'blue': 4, 'magenta': 5, 'cyan': 6,
@@ -64,7 +64,7 @@ DEFAULT_CONFIG = {
     'shadows': True,
     'clock_seconds': False,
     'clock_24h': True,
-    'desktop_logo': True,
+    'desktop_logo': False,
     'wallpaper': '',
     'background': 'auto',         # auto | logo | plain | image | matrix
     'rain_density': 1.0,
@@ -90,6 +90,7 @@ DEFAULT_CONFIG = {
     'opencode_host': '',
     'opencode_workdir': '',
     'kdeconnect_display': ':99',
+    'shot_dir': '~/monocell-shots',
     'color_mode': 'auto',         # auto | truecolor | palette | linux | ansi
     'bookmarks': [['Wikipedia', 'https://en.wikipedia.org'],
                   ['Hacker News', 'https://news.ycombinator.com'],

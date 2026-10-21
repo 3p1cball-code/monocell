@@ -16,6 +16,11 @@ Hardware (getestet gegen ein ThinkPad X61s mit 1024×768).
 *Screenshots aus dem Demo-Home, 120–160 Spalten. Die Fensterrahmen skalieren mit dem
 Terminal; alles hier ist echte Ausgabe, keine Mockups.*
 
+**Text-Screenshot:** `Alt+S` speichert den ganzen Bildschirm als Markdown-Datei mit
+24-Bit-ANSI-Farben (Standard: `~/monocell-shots/`). GitHub rendert den `ansi`-Block,
+`cat`/`bat`/`less -R` zeigen die exakten Farben; eine Klartext-Kopie im selben File
+bleibt ohne Farben lesbar. Beispiel: [screenshots/desktop-text.md](screenshots/desktop-text.md).
+
 ## Starten
 
 ```sh
@@ -57,6 +62,7 @@ unter dem Zeiger – im Terminal durch den Scrollback, in Listen und Seiten.
 | `Alt+Shift+Pfeile` | Größe ändern |
 | `Ctrl+Alt+Pfeile` | verschieben |
 | `Alt+Enter` | neues Terminal |
+| `Alt+S` | Text-Screenshot als Markdown speichern |
 
 Die Apps haben eigene Tasten (im Editor `Ctrl+S/O/F`, im Browser `Ctrl+L`, `Tab`,
 `Alt+←`, `Ctrl+D`, `Ctrl+F`, in der Musik `Leertaste`, `n`/`p`, `←`/`→`, …).
