@@ -87,4 +87,4 @@ echo
 echo "KDE Connect is running headless on $DISPLAY_NUM."
 echo "1. Open Monocell -> KDE Connect and press P to pair with the phone (accept there)."
 echo "2. Enable the Clipboard plugin for this device in KDE Connect on the phone."
-echo "3. In Monocell: V pulls the phone clipboard, C sends Monocell's clipboard."
+echo "3. In Monocell: V pulls the phone clipboard, S sends Monocell's clipboard."
