@@ -336,25 +336,27 @@ class TestTextShot(unittest.TestCase):
         b = Buffer(6, 3)
         b.ch[0] = list('ab  cd')
         b.at[0] = [A(1, 8)] * 2 + [A(14, 0)] * 2 + [A(9, 0)] * 2
-        b.ch[1] = list('```x  ')
+        b.ch[1] = list('<&>x  ')
         b.at[1] = [A(12, 9)] * 6
         b.ch[2] = list('      ')
-        b.at[2] = [A(3, 3)] + [A(0, 8)] * 5   # equal fg/bg -> block
+        b.at[2] = [A(3, 3)] + [A(0, 8)] * 5
         pal = ['%02x%02x%02x' % (i * 16, i * 8, i * 4) for i in range(16)]
         return shot, b, pal
 
-    def test_colours_and_fence(self):
+    def test_html_colours(self):
+        import datetime
         shot, b, pal = self.make()
         md = shot.markdown(b, pal, 'Ember', 'x61s', '1.0.0',
-                           when=__import__('datetime').datetime(2026, 10, 22, 1, 2, 3))
-        self.assertIn('\x1b[38;2;16;8;4m\x1b[48;2;128;64;32mab', md)   # slot 1 on 8
-        self.assertIn('\x1b[38;2;144;72;36m\x1b[48;2;0;0;0mcd\x1b[0m', md)
-        self.assertIn('````ansi', md)                    # four because of the ``` cells
-        self.assertIn('````text', md)
-        self.assertIn('\n#\n', md)                       # colour block in the plain copy
-        self.assertIn('`0 #000000`', md)
-        self.assertIn('#f0783c', md)
+                           when=datetime.datetime(2026, 10, 22, 1, 2, 3))
+        self.assertIn('<span style="color:#100804;background-color:#804020">ab</span>', md)
+        self.assertIn('<span style="color:#904824;background-color:#000000">cd</span>', md)
+        self.assertIn('&lt;&amp;&gt;x', md)                # escaped, still one cell each
+        self.assertNotIn('\x1b', md)                       # no ANSI codes any more
+        self.assertEqual(md.count('<pre'), 1)
+        pre = md[md.index('<pre'):md.index('</pre>')]
+        self.assertEqual(pre.count('\n'), 2)               # 3 rows, no blank lines
         self.assertIn('# Monocell screenshot — 2026-10-22 01:02:03', md)
+        self.assertIn('`15 #f0783c`', md)
 
     def test_save_file(self):
         import tempfile, os, datetime
@@ -363,10 +365,20 @@ class TestTextShot(unittest.TestCase):
             path, size = shot.save(b, pal, 'Ember', 'x61s', '1.0.0', d,
                                    when=datetime.datetime(2026, 10, 22, 1, 2, 3))
             self.assertTrue(path.endswith('monocell-20261022-010203.md'))
-            self.assertTrue(os.path.isfile(path))
             self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
             self.assertGreater(size, 100)
-            self.assertIn('\x1b[38;2;16;8;4m', open(path, encoding='utf-8').read())
+            self.assertIn('background-color:#', open(path, encoding='utf-8').read())
+
+
+    def test_convert_legacy_ansi(self):
+        from monocell import shot
+        old = ('# Monocell screenshot — x\n\n2×1 · host `h` · palette `P` · v1\n\n```ansi\n'
+               '\x1b[38;2;255;0;0m\x1b[48;2;0;0;255mab\x1b[0m\n```\n\n## Palette\n\n`0 #000000`\n')
+        new = shot.convert_legacy(old)
+        self.assertIn('<span style="color:#ff0000;background-color:#0000ff">ab</span>', new)
+        self.assertNotIn('\x1b', new)
+        self.assertIn('## Palette', new)
+        self.assertIsNone(shot.convert_legacy('# nothing here'))
 
 
 class TestVTModifiers(unittest.TestCase):

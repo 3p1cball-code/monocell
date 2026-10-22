@@ -1,53 +1,52 @@
-"""Text screenshots: the whole screen as a Markdown file with ANSI colours.
+"""Text screenshots: the whole screen as a Markdown file with its colours.
 
-The file opens in any text editor (line breaks and characters are plain text). A plain
-copy is visible everywhere; the collapsed block keeps exact 24-bit ANSI colours for
-terminals such as cat, bat or less -R.
+Colours are inline HTML inside the Markdown: every preview that allows HTML (Kate's
+Document Preview / Okular, browsers, VS Code, Obsidian) shows them; GitHub strips the
+styles and shows the text.
 """
 import datetime
 import os
-
-FENCE_MIN = 3
-
-
-def _rgb(hex_colour):
-    h = hex_colour.lstrip('#')
-    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+import re
+import sys
 
 
-def _sgr(attr, palette):
-    """24-bit SGR with the exact palette colours (widely supported by terminals
-    and by GitHub's `ansi` code blocks)."""
-    fg = _rgb(palette[attr & 15])
-    bg = _rgb(palette[(attr >> 4) & 15])
-    return ('\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm' % (fg + bg))
+def _esc(text):
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 
-def _fence(rows):
-    longest = 0
-    for line in rows:
-        run = 0
-        for ch in line:
-            run = run + 1 if ch == '`' else 0
-            longest = max(longest, run)
-    return '`' * max(FENCE_MIN, longest + 1)
-
-
-def colour_block(rows, attrs, palette):
-    """ANSI version: one SGR run per colour change, reset at every line end."""
+def html_block(rows, attrs, palette):
+    """<pre> with one coloured <span> per run. Markdown previews that allow inline HTML
+    (Kate/Okular, browsers, VS Code, Obsidian) show the colours; GitHub strips the styles
+    and still shows the text."""
+    counts = {}
+    for at in attrs:
+        for a in at:
+            b = (a >> 4) & 15
+            counts[b] = counts.get(b, 0) + 1
+    base = max(counts, key=counts.get) if counts else 0
     out = []
     for line, at in zip(rows, attrs):
         buf = []
         cur = None
+        run = []
+
+        def flush():
+            if run:
+                fg, bg = palette[cur & 15], palette[(cur >> 4) & 15]
+                buf.append('<span style="color:#%s;background-color:#%s">%s</span>'
+                           % (fg, bg, _esc(''.join(run))))
+                run.clear()
         for ch, a in zip(line, at):
             a &= 0xff
             if a != cur:
-                buf.append(_sgr(a, palette))
+                flush()
                 cur = a
-            buf.append(ch if ch >= ' ' and ch != '\x7f' else ' ')
-        buf.append('\x1b[0m')
+            run.append(ch if ch >= ' ' and ch != '\x7f' else ' ')
+        flush()
         out.append(''.join(buf))
-    return out
+    return ('<pre style="display:inline-block;background-color:#%s;line-height:1.0;'
+            'font-family:monospace">'
+            % palette[base] + '\n'.join(out) + '</pre>')
 
 
 def markdown(buf, palette, palette_name, host, version, when=None, title='Monocell'):
@@ -55,27 +54,15 @@ def markdown(buf, palette, palette_name, host, version, when=None, title='Monoce
     when = when or datetime.datetime.now()
     rows = [''.join(r) for r in buf.ch]
     attrs = [list(a) for a in buf.at]
-    fence = _fence(rows)
-    ansi = colour_block(rows, attrs, palette)
-    # plain fallback: colour blocks (e.g. the logo) are drawn as # so the shape survives
-    plain = []
-    for line, at in zip(rows, attrs):
-        plain.append(''.join('#' if ch == ' ' and (a & 15) == ((a >> 4) & 15) else ch
-                             for ch, a in zip(line, at)).rstrip())
     stamp = when.strftime('%Y-%m-%d %H:%M:%S')
-    cols, lines = buf.w, buf.h
     out = ['# %s screenshot — %s' % (title, stamp), '',
-           '%d×%d · host `%s` · palette `%s` · v%s' % (cols, lines, host, palette_name, version),
-           '', fence + 'text']
-    out += plain
-    out += [fence, '',
-            '> GitHub shows this plain copy. The colour version below stores the exact 24-bit',
-            '> palette; `cat`, `bat`, `less -R` or an ANSI-aware viewer render it.',
-            '', '<details><summary>Colour version (ANSI, exact palette)</summary>', '',
-            fence + 'ansi']
-    out += ansi
-    out += [fence, '', '</details>', '', '## Palette', '']
-    pairs = ['`%d %s`' % (i, '#' + h) for i, h in enumerate(palette)]
+           '%d×%d · host `%s` · palette `%s` · v%s' % (buf.w, buf.h, host, palette_name, version),
+           '',
+           html_block(rows, attrs, palette), '',
+           'Colours: open the Markdown preview (Kate: Document Preview, Okular, a browser,',
+           'VS Code). GitHub removes inline colours and shows the text only.', '',
+           '## Palette', '']
+    pairs = ['`%d #%s`' % (i, h) for i, h in enumerate(palette)]
     out += [' '.join(pairs[:8]), '', ' '.join(pairs[8:]), '']
     return '\n'.join(out)
 
@@ -99,3 +86,67 @@ def save(buf, palette, palette_name, host, version, directory, when=None, title=
         f.write(text)
     os.replace(tmp, path)
     return path, len(text.encode('utf-8'))
+
+
+SGR = re.compile(r'\x1b\[([0-9;]*)m')
+
+
+def convert_legacy(text):
+    """Turn a screenshot from the first (ANSI) format into the HTML format."""
+    m = re.search(r'^(`{3,})ansi\n(.*?)^\1$', text, re.S | re.M)
+    if not m:
+        return None
+    lines = []
+    for raw in m.group(2).rstrip('\n').split('\n'):
+        fg, bg = 'c4c4c4', '000000'
+        out, pos = [], 0
+        for sm in list(SGR.finditer(raw)) + [None]:
+            chunk = raw[pos:sm.start() if sm else len(raw)]
+            if chunk:
+                out.append('<span style="color:#%s;background-color:#%s">%s</span>'
+                           % (fg, bg, _esc(chunk)))
+            if sm is None:
+                break
+            pos = sm.end()
+            ps = [int(x) for x in sm.group(1).split(';') if x]
+            if ps[:2] == [38, 2] and len(ps) >= 5:
+                fg = '%02x%02x%02x' % tuple(ps[2:5])
+            elif ps[:2] == [48, 2] and len(ps) >= 5:
+                bg = '%02x%02x%02x' % tuple(ps[2:5])
+        lines.append(''.join(out))
+    pre = ('<pre style="display:inline-block;background-color:#0c0c0c;line-height:1.0;'
+           'font-family:monospace">' + '\n'.join(lines) + '</pre>')
+    title = text.split('\n', 1)[0]
+    meta = re.search(r'^\d+×\d+ ·.*$', text, re.M)
+    pal = text[text.index('## Palette'):].rstrip('\n') if '## Palette' in text else ''
+    out = [title, '']
+    if meta:
+        out += [meta.group(0), '']
+    out += [pre, '',
+            'Colours: open the Markdown preview (Kate: Document Preview, Okular, a browser,',
+            'VS Code). GitHub removes inline colours and shows the text only.', '']
+    if pal:
+        out += [pal, '']
+    return '\n'.join(out)
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) < 2 or argv[0] != 'convert':
+        print('usage: python3 -m monocell.shot convert FILE.md [...]   (old ANSI shots, in place)')
+        return 2
+    rc = 0
+    for path in argv[1:]:
+        text = open(path, encoding='utf-8').read()
+        new = convert_legacy(text)
+        if new is None:
+            print('%s: no ANSI block, left as is' % path)
+            continue
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new)
+        print('%s: converted' % path)
+    return rc
+
+
+if __name__ == '__main__':
+    sys.exit(main())
