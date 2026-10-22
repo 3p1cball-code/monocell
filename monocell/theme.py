@@ -78,6 +78,7 @@ DEFAULT_CONFIG = {
     'video_mode': 'pixel',
     'cell_aspect': 0.0,           # 0 = auto (h/w ratio of a cell, usually ~2)
     'video_fps': 15,
+    'av_offset': 0,               # ms; negative shows the picture earlier than the sound
     'audio_sink': 'auto',         # auto | pw-cat | pacat | aplay
     'web_engine': 'auto',         # auto | lite | chromium
     'web_images': True,

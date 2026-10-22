@@ -2,6 +2,13 @@
 
 Pacing the writes ourselves keeps pause/seek instant, gives an exact playback clock
 (used as master clock by the video player) and the samples for the visualiser.
+
+The clock counts bytes written, not wall-clock time, so it follows the sound card
+instead of drifting away from it.  Two known delays sit between "written" and
+"heard": the lead we keep queued ahead of the wall clock, and the buffer the sink
+itself asks the sound server for.  Both are subtracted in :meth:`AudioPlayer.position`,
+which is what keeps picture and sound together.  A sink that buffers for half a
+second (aplay's default) therefore no longer drags the audio behind the video.
 """
 import json
 import math
@@ -15,15 +22,38 @@ from .util import which
 RATE = 44100
 CH = 2
 BPS = RATE * CH * 2          # bytes per second
-LEAD = 0.25                  # seconds written ahead of the wall clock
+LEAD = 0.15                  # seconds written ahead of the wall clock
+
+# Request small device buffers: whatever the sink holds is audible delay.  These
+# are the values the clock assumes; a sink may use a little more, which is why
+# the video player also offers a manual A/V offset.
+SINK_LATENCY = {
+    'pw-cat': 0.06,
+    'pacat': 0.06,
+    'aplay': 0.12,
+}
 
 SINKS = {
     # --raw is essential: without it pw-cat treats '-' as a sound file and dies
     'pw-cat': ['pw-cat', '--playback', '--raw', '--format', 's16', '--rate', str(RATE),
-               '--channels', str(CH), '-'],
-    'pacat': ['pacat', '--raw', '--format=s16le', '--rate=%d' % RATE, '--channels=%d' % CH],
-    'aplay': ['aplay', '-q', '-t', 'raw', '-f', 'S16_LE', '-r', str(RATE), '-c', str(CH)],
+               '--channels', str(CH), '--latency=60ms', '-'],
+    'pacat': ['pacat', '--raw', '--format=s16le', '--rate=%d' % RATE, '--channels=%d' % CH,
+              '--latency-msec=60'],
+    'aplay': ['aplay', '-q', '-t', 'raw', '-f', 'S16_LE', '-r', str(RATE), '-c', str(CH),
+              '-B', '120000', '-F', '40000'],
 }
+
+
+def playing_position(written, elapsed, buffered, offset=0.0):
+    """Media time of the sample that is leaving the speakers right now.
+
+    ``written``  bytes handed to the sink so far
+    ``elapsed``  seconds since playback started (wall clock)
+    ``buffered`` seconds of audio still queued in pipe, process and device
+    """
+    if written <= 0:
+        return offset
+    return offset + max(0.0, min(written / BPS - buffered, elapsed))
 
 
 def _available(name):
@@ -38,10 +68,17 @@ def _available(name):
 
 
 def pick_sinks(pref='auto'):
-    """Ordered list of usable sinks; the preferred one first."""
+    """Ordered list of usable sinks; the preferred one first.
+
+    pacat comes before pw-cat: where both exist the Pulse/PipeWire compat layer is
+    the one that knows the configured default sink, while a bare native client can
+    end up with "no target node available".
+    """
     if os.environ.get('MONOCELL_NOAUDIO'):
         return []
-    order = ['pw-cat', 'pacat', 'aplay']
+    rt = '/run/user/%d' % os.getuid()
+    order = ['pacat', 'pw-cat', 'aplay'] if os.path.exists(rt + '/pulse/native') else \
+            ['pw-cat', 'pacat', 'aplay']
     if pref in order:
         order.remove(pref)
         order.insert(0, pref)
@@ -160,7 +197,6 @@ class AudioPlayer:
         self.start_t = 0.0
         self.offset = 0.0
         self.paused = False
-        self.pause_t = 0.0
         self.volume = 1.0
         self.timer = None
         self.path = None
@@ -292,7 +328,7 @@ class AudioPlayer:
         if getattr(self, 'reader_paused', False) and len(self.buf) < BPS:
             self.reader_paused = False
             self.wm.loop.add_reader(self.dec.stdout.fileno(), self._read)
-        if self.eof and not self.buf and elapsed > self.written / BPS + 0.05:
+        if self.eof and not self.buf and elapsed > self.written / BPS + self.buffered + 0.05:
             self.stop()
             if self.on_end:
                 self.on_end()
@@ -300,33 +336,45 @@ class AudioPlayer:
             self.start_t = time.monotonic() - self.written / BPS
 
     @property
+    def buffered(self):
+        """Seconds of audio we have handed over but that have not been heard yet."""
+        return LEAD + SINK_LATENCY.get(self.sink_name, 0.10)
+
+    @property
     def position(self):
-        if not self.dec:
+        """Media time leaving the speakers; the video player uses this as master clock."""
+        if not self.dec or self.paused:
             return self.offset
-        if self.paused:
-            return self.offset + self.written / BPS
-        el = time.monotonic() - self.start_t
-        return self.offset + max(0.0, min(el, self.written / BPS))
+        return playing_position(self.written, time.monotonic() - self.start_t,
+                                self.buffered, self.offset)
+
+    def pause(self):
+        if not self.dec or self.paused:
+            return
+        self.offset = self.position
+        self._halt()
+        self.paused = True
+
+    def resume(self):
+        if not self.path or not self.paused:
+            return
+        self.play(self.path, self.offset)
 
     def toggle(self):
-        if not self.dec:
-            if self.path:
-                self.play(self.path, self.offset)
-            return
         if self.paused:
-            self.start_t = time.monotonic() - self.written / BPS
-            self.paused = False
-        else:
-            self.pause_t = time.monotonic()
-            self.paused = True
+            self.resume()
+        elif self.dec:
+            self.pause()
+        elif self.path:
+            self.play(self.path, self.offset)
 
     def seek(self, t):
-        if self.path:
-            was_paused = self.paused
+        if not self.path:
+            return
+        if self.paused:
+            self.offset = max(0.0, t)
+        else:
             self.play(self.path, t)
-            if was_paused:
-                self.pause_t = time.monotonic()
-                self.paused = True
 
     def levels(self, spec):
         if not self.dec or self.paused or not self.last_chunk:
@@ -334,11 +382,17 @@ class AudioPlayer:
         return spec.compute(self.last_chunk)
 
     def stop(self):
+        pos = self.position
+        self._halt()
+        self.offset = pos
+        self.paused = False
+
+    def _halt(self):
+        """Kill decoder and sink; leaves path/offset/paused alone."""
         if self.timer:
             self.timer.cancel()
             self.timer = None
         if self.dec:
-            pos = self.position
             try:
                 self.wm.loop.remove_reader(self.dec.stdout.fileno())
             except (ValueError, OSError):
@@ -361,7 +415,6 @@ class AudioPlayer:
                         f.close()
                 except OSError:
                     pass
-            self.offset = pos
         self.dec = None
         self.sink = None
-        self.paused = False
+        self.reader_paused = False

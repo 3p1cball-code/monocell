@@ -36,6 +36,8 @@ class Video(App):
         self.fps = wm.cfg.get('video_fps', 15)
         self.offset = 0.0          # media time of frame 0 of the current decoder
         self.clock0 = 0.0
+        self.last_audio = 0.0      # last position reported by the audio master clock
+        self.last_audio_at = 0.0
         self.paused = False
         self.pause_pos = 0.0
         self.chrome = True
@@ -121,14 +123,18 @@ class Video(App):
                 self.reading = True
             except OSError as e:
                 self.err = str(e)
-        if info.get('audio'):
+        # while paused only the picture is decoded; sound starts on resume, so that
+        # nothing keeps playing out of the sink buffer behind a frozen frame
+        if info.get('audio') and not self.paused:
             if not self.audio.play(self.path, self.offset):
                 if not self.audio_err_shown:
                     self.audio_err_shown = True
                     self.wm.toast('Audio: %s' % self.audio.error)
-            elif self.paused:
-                self.audio.toggle()
+        elif self.paused:
+            self.audio.stop()
         self.clock0 = time.monotonic()
+        self.last_audio = self.offset
+        self.last_audio_at = 0.0
         if self.paused:
             self.pause_pos = self.offset
 
@@ -182,16 +188,26 @@ class Video(App):
     def media_time(self):
         if self.paused:
             return self.pause_pos
-        if self.audio.dec and (self.info or {}).get('audio'):
-            return self.audio.position
+        if (self.info or {}).get('audio'):
+            if self.audio.dec:
+                self.last_audio = self.audio.position
+                self.last_audio_at = time.monotonic()
+                return self.last_audio
+            if self.last_audio_at:       # sound ended (or failed): keep counting from there
+                return self.last_audio + (time.monotonic() - self.last_audio_at)
         return self.offset + (time.monotonic() - self.clock0)
 
     def tick(self):
         if not self.info:
             return
         t = self.media_time()
+        # the sound is the master clock; the picture is rendered a frame's length
+        # ahead so that it is on screen when its sound is due, and av_offset lets
+        # the user trim the last few milliseconds by hand
+        extra = 0.0 if self.paused else (min(1.0 / self.fps, self.stats[1] / 1000.0) +
+                                         self.wm.cfg.get('av_offset', 0) / 1000.0)
         if self.dec or self.frames:
-            want = int((t - self.offset) * self.fps)
+            want = max(0, int((t - self.offset + extra) * self.fps))
             frame = None
             while self.frames and self.frames[0][0] <= want:
                 frame = self.frames.pop(0)
@@ -226,18 +242,20 @@ class Video(App):
             return
         if self.paused:
             self.paused = False
-            if self.audio.dec:
-                self.audio.toggle()
-            self.clock0 = time.monotonic() - (self.pause_pos - self.offset)
+            self.start(self.pause_pos)
         else:
+            # freeze picture and sound together: stopping the sink here means the
+            # buffer cannot keep playing while the frame stands still
             self.pause_pos = self.media_time()
             self.paused = True
-            if self.audio.dec:
-                self.audio.toggle()
+            self.stop()
 
     def seek(self, t):
         dur = (self.info or {}).get('duration') or 0
         t = max(0.0, min(t, max(0.0, dur - 0.5))) if dur else max(0.0, t)
+        if self.ended:
+            self.ended = False
+            self.paused = False
         self.start(t)
 
     def on_resize(self, w, h):
