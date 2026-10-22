@@ -152,6 +152,7 @@ REGISTRY = [
     ('pdf', 'pdf', 'PDF', '[P]', 'PDF reader', 'Office'),
     ('calc', 'calc', 'Calculator', '[+]', 'Calculator', 'Office'),
     ('calendar', 'calendar', 'Calendar', '[31', 'Calendar', 'Office'),
+    ('mail', 'mail', 'Mail', '[M]', 'IMAP/SMTP mail', 'Office'),
     ('viewer', 'viewer', 'Pictures', '[*]', 'Image viewer', 'Media'),
     ('video', 'video', 'Video', '[>]', 'Video player', 'Media'),
     ('youtube', 'youtube', 'YouTube', '[Y]', 'Search & play YouTube', 'Media'),
