@@ -615,12 +615,15 @@ class WM:
         if not buf:
             return
         try:
-            path, size = shot.save(buf, self.cfg['palette'], self.cfg.get('preset', 'Custom'),
-                                   self.hostname, __version__, self.cfg.get('shot_dir'))
+            path, colour, msize, hsize = shot.save(
+                buf, self.cfg['palette'], self.cfg.get('preset', 'Custom'),
+                self.hostname, __version__, self.cfg.get('shot_dir'))
         except OSError as e:
             self.toast('Screenshot failed: %s' % e, 'red')
             return
-        self.toast('Saved %s (%d KB)' % (os.path.basename(path), max(1, size // 1024)))
+        self.toast('Saved %s + %s (%d/%d KB)' % (os.path.basename(path),
+                                                os.path.basename(colour),
+                                                max(1, msize // 1024), max(1, hsize // 1024)))
 
     def copy_text(self, text):
         if not text:

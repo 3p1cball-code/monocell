@@ -16,13 +16,14 @@ Hardware (getestet gegen ein ThinkPad X61s mit 1024×768).
 *Screenshots aus dem Demo-Home, 120–160 Spalten. Die Fensterrahmen skalieren mit dem
 Terminal; alles hier ist echte Ausgabe, keine Mockups.*
 
-**Text-Screenshot:** `Alt+S` speichert den ganzen Bildschirm als Markdown-Datei
-(Standard: `~/monocell-shots/`). Die Zeichen stehen in einem `<pre>`-Block, die Farben als
-Inline-HTML – jede Markdown-Vorschau, die HTML zulässt, zeigt das Bild farbgetreu
-(Kate: Dokumentvorschau, Okular, Browser, VS Code, Obsidian). GitHub entfernt die Farben
-und zeigt nur den Text. Ältere ANSI-Screenshots wandelt
-`python3 -m monocell.shot convert DATEI.md` um. Beispiel:
-[screenshots/desktop-text.md](screenshots/desktop-text.md).
+**Text-Screenshot:** `Alt+S` speichert zwei Dateien in `~/monocell-shots/`:
+`…md` mit dem Bild als reinem Text (lesbar in Kate, GitHub und jedem Editor) und
+`…-colour.html` mit derselben Ansicht in exakten Farben (im Browser oder in Kates
+Dokumentvorschau öffnen). Ein einzelnes Markdown-File kann im Quelltext-Editor keine
+Farbe pro Zeichen zeigen – deshalb die Begleitdatei. Beispiel:
+[screenshots/desktop-text.md](screenshots/desktop-text.md) ·
+[Farbfassung](screenshots/desktop-text-colour.html). Ordner in Einstellungen → Tools
+änderbar.
 
 ## Starten
 

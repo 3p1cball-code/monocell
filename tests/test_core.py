@@ -343,42 +343,45 @@ class TestTextShot(unittest.TestCase):
         pal = ['%02x%02x%02x' % (i * 16, i * 8, i * 4) for i in range(16)]
         return shot, b, pal
 
+    def test_plain_markdown(self):
+        import datetime
+        shot, b, pal = self.make()
+        rows = [''.join(r) for r in b.ch]
+        md = shot.markdown_plain(rows, 'Ember', 'x61s', '1.0.0',
+                                 datetime.datetime(2026, 10, 22, 1, 2, 3), 'x-colour.html')
+        self.assertIn('```text', md)
+        self.assertIn('ab  cd', md)
+        self.assertIn('[x-colour.html](x-colour.html)', md)
+        self.assertNotIn('\x1b', md)
+        self.assertNotIn('<span', md)
+
     def test_html_colours(self):
         import datetime
         shot, b, pal = self.make()
-        md = shot.markdown(b, pal, 'Ember', 'x61s', '1.0.0',
-                           when=datetime.datetime(2026, 10, 22, 1, 2, 3))
-        self.assertIn('<span style="color:#100804;background-color:#804020">ab</span>', md)
-        self.assertIn('<span style="color:#904824;background-color:#000000">cd</span>', md)
-        self.assertIn('&lt;&amp;&gt;x', md)                # escaped, still one cell each
-        self.assertNotIn('\x1b', md)                       # no ANSI codes any more
-        self.assertEqual(md.count('<pre'), 1)
-        pre = md[md.index('<pre'):md.index('</pre>')]
-        self.assertEqual(pre.count('\n'), 2)               # 3 rows, no blank lines
-        self.assertIn('# Monocell screenshot — 2026-10-22 01:02:03', md)
-        self.assertIn('`15 #f0783c`', md)
+        html = shot.html_document([''.join(r) for r in b.ch], [list(a) for a in b.at], pal,
+                                  'Ember', 'x61s', '1.0.0', datetime.datetime(2026, 10, 22, 1, 2, 3))
+        self.assertIn('<span style="color:#100804;background-color:#804020">ab</span>', html)
+        self.assertIn('<span style="color:#904824;background-color:#000000">cd</span>', html)
+        self.assertIn('&lt;&amp;&gt;x', html)
+        self.assertNotIn('\x1b', html)
+        self.assertIn('<pre', html)
+        self.assertIn('15 #f0783c', html)
 
-    def test_save_file(self):
+    def test_save_pair(self):
         import tempfile, os, datetime
         shot, b, pal = self.make()
         with tempfile.TemporaryDirectory() as d:
-            path, size = shot.save(b, pal, 'Ember', 'x61s', '1.0.0', d,
-                                   when=datetime.datetime(2026, 10, 22, 1, 2, 3))
-            self.assertTrue(path.endswith('monocell-20261022-010203.md'))
-            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
-            self.assertGreater(size, 100)
-            self.assertIn('background-color:#', open(path, encoding='utf-8').read())
-
-
-    def test_convert_legacy_ansi(self):
-        from monocell import shot
-        old = ('# Monocell screenshot — x\n\n2×1 · host `h` · palette `P` · v1\n\n```ansi\n'
-               '\x1b[38;2;255;0;0m\x1b[48;2;0;0;255mab\x1b[0m\n```\n\n## Palette\n\n`0 #000000`\n')
-        new = shot.convert_legacy(old)
-        self.assertIn('<span style="color:#ff0000;background-color:#0000ff">ab</span>', new)
-        self.assertNotIn('\x1b', new)
-        self.assertIn('## Palette', new)
-        self.assertIsNone(shot.convert_legacy('# nothing here'))
+            md, colour, msize, hsize = shot.save(
+                b, pal, 'Ember', 'x61s', '1.0.0', d,
+                when=datetime.datetime(2026, 10, 22, 1, 2, 3))
+            self.assertTrue(md.endswith('monocell-20261022-010203.md'))
+            self.assertTrue(colour.endswith('monocell-20261022-010203-colour.html'))
+            self.assertTrue(os.path.isfile(md) and os.path.isfile(colour))
+            self.assertEqual(os.stat(md).st_mode & 0o777, 0o600)
+            self.assertIn('[monocell-20261022-010203-colour.html]', open(md, encoding='utf-8').read())
+            self.assertIn('background-color:#', open(colour, encoding='utf-8').read())
+            self.assertGreater(msize, 50)
+            self.assertGreater(hsize, 100)
 
 
 class TestVTModifiers(unittest.TestCase):

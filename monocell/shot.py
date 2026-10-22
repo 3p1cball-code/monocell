@@ -1,13 +1,11 @@
-"""Text screenshots: the whole screen as a Markdown file with its colours.
+"""Text screenshots: a readable Markdown file plus a coloured HTML companion.
 
-Colours are inline HTML inside the Markdown: every preview that allows HTML (Kate's
-Document Preview / Okular, browsers, VS Code, Obsidian) shows them; GitHub strips the
-styles and shows the text.
+The Markdown is plain text (line breaks and characters) and opens in any editor. The
+HTML file keeps the exact palette in inline styles and opens in any browser (and in
+Kate's/Okular's preview); GitHub shows the HTML only as source.
 """
 import datetime
 import os
-import re
-import sys
 
 
 def _esc(text):
@@ -49,22 +47,36 @@ def html_block(rows, attrs, palette):
             % palette[base] + '\n'.join(out) + '</pre>')
 
 
-def markdown(buf, palette, palette_name, host, version, when=None, title='Monocell'):
-    """Build the Markdown text for a screen buffer (Buffer.ch / Buffer.at)."""
-    when = when or datetime.datetime.now()
-    rows = [''.join(r) for r in buf.ch]
-    attrs = [list(a) for a in buf.at]
+def plain_rows(rows):
+    return [line.rstrip() for line in rows]
+
+
+def markdown_plain(rows, palette_name, host, version, when, colour_name, title='Monocell'):
     stamp = when.strftime('%Y-%m-%d %H:%M:%S')
     out = ['# %s screenshot — %s' % (title, stamp), '',
-           '%d×%d · host `%s` · palette `%s` · v%s' % (buf.w, buf.h, host, palette_name, version),
-           '',
-           html_block(rows, attrs, palette), '',
-           'Colours: open the Markdown preview (Kate: Document Preview, Okular, a browser,',
-           'VS Code). GitHub removes inline colours and shows the text only.', '',
-           '## Palette', '']
-    pairs = ['`%d #%s`' % (i, h) for i, h in enumerate(palette)]
-    out += [' '.join(pairs[:8]), '', ' '.join(pairs[8:]), '']
+           '%d×%d · host `%s` · palette `%s` · v%s' % (len(rows[0]) if rows else 0, len(rows),
+                                                       host, palette_name, version), '',
+           '```text']
+    out += plain_rows(rows)
+    out += ['```', '',
+            'Farbfassung: [%s](%s) – im Browser öffnen (exakte Farben, Text bleibt markierbar).'
+            % (colour_name, colour_name), '']
     return '\n'.join(out)
+
+
+def html_document(rows, attrs, palette, palette_name, host, version, when, title='Monocell'):
+    stamp = when.strftime('%Y-%m-%d %H:%M:%S')
+    pre = html_block(rows, attrs, palette)
+    pairs = ' · '.join('%d #%s' % (i, h) for i, h in enumerate(palette))
+    return ('<!doctype html>\n<html><head><meta charset="utf-8">\n'
+            '<title>%s screenshot %s</title></head>\n'
+            '<body style="margin:0;padding:16px;background:#111;color:#c4c4c4;'
+            'font:12px/1.35 monospace">\n'
+            '<h1 style="font-size:16px;color:#ff8a1c">%s screenshot — %s</h1>\n'
+            '<p>%d×%d · host %s · palette %s · v%s</p>\n%s\n'
+            '<p style="color:#7c7c7c">%s</p>\n</body></html>\n'
+            % (_esc(title), stamp, _esc(title), stamp, len(rows[0]) if rows else 0, len(rows),
+               _esc(host), _esc(palette_name), version, pre, pairs))
 
 
 def save(buf, palette, palette_name, host, version, directory, when=None, title='Monocell'):
@@ -73,80 +85,23 @@ def save(buf, palette, palette_name, host, version, directory, when=None, title=
     if not os.path.isabs(directory):
         directory = os.path.join(os.path.expanduser('~'), directory)
     os.makedirs(directory, mode=0o700, exist_ok=True)
+    rows = [''.join(r) for r in buf.ch]
+    attrs = [list(a) for a in buf.at]
     base = 'monocell-%s' % when.strftime('%Y%m%d-%H%M%S')
     path = os.path.join(directory, base + '.md')
     n = 2
     while os.path.exists(path):
         path = os.path.join(directory, '%s-%d.md' % (base, n))
         n += 1
-    text = markdown(buf, palette, palette_name, host, version, when, title)
-    tmp = path + '.tmp'
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, 'w', encoding='utf-8') as f:
-        f.write(text)
-    os.replace(tmp, path)
-    return path, len(text.encode('utf-8'))
+    stem = path[:-3]
+    colour = stem + '-colour.html'
+    md = markdown_plain(rows, palette_name, host, version, when, os.path.basename(colour), title)
+    html = html_document(rows, attrs, palette, palette_name, host, version, when, title)
+    for target, text in ((path, md), (colour, html)):
+        tmp = target + '.tmp'
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(text)
+        os.replace(tmp, target)
+    return path, colour, len(md.encode('utf-8')), len(html.encode('utf-8'))
 
-
-SGR = re.compile(r'\x1b\[([0-9;]*)m')
-
-
-def convert_legacy(text):
-    """Turn a screenshot from the first (ANSI) format into the HTML format."""
-    m = re.search(r'^(`{3,})ansi\n(.*?)^\1$', text, re.S | re.M)
-    if not m:
-        return None
-    lines = []
-    for raw in m.group(2).rstrip('\n').split('\n'):
-        fg, bg = 'c4c4c4', '000000'
-        out, pos = [], 0
-        for sm in list(SGR.finditer(raw)) + [None]:
-            chunk = raw[pos:sm.start() if sm else len(raw)]
-            if chunk:
-                out.append('<span style="color:#%s;background-color:#%s">%s</span>'
-                           % (fg, bg, _esc(chunk)))
-            if sm is None:
-                break
-            pos = sm.end()
-            ps = [int(x) for x in sm.group(1).split(';') if x]
-            if ps[:2] == [38, 2] and len(ps) >= 5:
-                fg = '%02x%02x%02x' % tuple(ps[2:5])
-            elif ps[:2] == [48, 2] and len(ps) >= 5:
-                bg = '%02x%02x%02x' % tuple(ps[2:5])
-        lines.append(''.join(out))
-    pre = ('<pre style="display:inline-block;background-color:#0c0c0c;line-height:1.0;'
-           'font-family:monospace">' + '\n'.join(lines) + '</pre>')
-    title = text.split('\n', 1)[0]
-    meta = re.search(r'^\d+×\d+ ·.*$', text, re.M)
-    pal = text[text.index('## Palette'):].rstrip('\n') if '## Palette' in text else ''
-    out = [title, '']
-    if meta:
-        out += [meta.group(0), '']
-    out += [pre, '',
-            'Colours: open the Markdown preview (Kate: Document Preview, Okular, a browser,',
-            'VS Code). GitHub removes inline colours and shows the text only.', '']
-    if pal:
-        out += [pal, '']
-    return '\n'.join(out)
-
-
-def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if len(argv) < 2 or argv[0] != 'convert':
-        print('usage: python3 -m monocell.shot convert FILE.md [...]   (old ANSI shots, in place)')
-        return 2
-    rc = 0
-    for path in argv[1:]:
-        text = open(path, encoding='utf-8').read()
-        new = convert_legacy(text)
-        if new is None:
-            print('%s: no ANSI block, left as is' % path)
-            continue
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(new)
-        print('%s: converted' % path)
-    return rc
-
-
-if __name__ == '__main__':
-    sys.exit(main())
