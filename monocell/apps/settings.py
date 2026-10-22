@@ -35,7 +35,9 @@ OPTIONS = {
         ('ascii_charset', 'ASCII charset', ['full', 'simple', 'shades']),
         ('cell_aspect', 'Cell aspect h/w (0 = auto)', [0.0, 1.8, 2.0, 2.2, 2.4, 1.5, 1.0]),
         ('video_fps', 'Video frame rate', [15, 10, 12, 20, 24, 30, 8]),
-        ('audio_sink', 'Audio output', ['auto', 'pw-cat', 'pacat', 'aplay']),
+        ('av_offset', 'A/V offset ms (negative = picture earlier)',
+         [0, -40, -80, -120, -160, 40, 80, 120]),
+        ('audio_sink', 'Audio output', ['auto', 'pacat', 'pw-cat', 'aplay']),
     ],
     'web': [
         ('web_engine', 'Engine', ['auto', 'lite', 'chromium']),
@@ -311,10 +313,11 @@ class Settings(App):
                 cv.put(0, y + i, ln, th.c('dim', 'win'))
         if self.section == 'calendar' and y < cv.h:
             from ..util import wrap_text
-            txt = ('Read-only subscription. In Google Calendar open Settings > <calendar> > '
-                   '"Secret address in iCal format" and paste that URL here. Google events appear '
-                   'in the Calendar app (blue) next to your local entries; refreshes every 20 min. '
-                   'The address is a secret - it is stored in ~/.config/monocell/config.json (0600).')
+            txt = ('Display only. In Google Calendar open Settings > <calendar> > '
+                   '"Secret address in iCal format" and paste that URL here. The Calendar app '
+                   'shows those events; there are no local entries and nothing to add or delete. '
+                   'Refreshes every 20 min. The address is a secret - it is stored in '
+                   '~/.config/monocell/config.json (0600).')
             for i, ln in enumerate(wrap_text(txt, cv.w)):
                 cv.put(0, y + i, ln, th.c('dim', 'win'))
 

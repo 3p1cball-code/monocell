@@ -1,33 +1,15 @@
-"""Calendar: month view with ISO weeks, local events and a Google Calendar ICS subscription."""
+"""Calendar: month view with ISO weeks, showing a Google Calendar ICS subscription.
+
+The calendar is a pure display. Events are created in Google Calendar itself -
+there is no local event store and nothing to delete in monocell.
+"""
 import calendar as pycal
 import datetime as dt
-import json
-import os
-import re
 
 from .. import gcal
 from ..app import App
-from ..util import DATA_DIR, ensure_dirs, fit, sym, wrap_text
+from ..util import fit, sym, wrap_text
 from ..widgets import button
-
-STORE = os.path.join(DATA_DIR, 'calendar.json')
-TIME_RE = re.compile(r'^\s*(\d{1,2}:\d{2})\s*')
-
-
-def load_events():
-    try:
-        with open(STORE) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
-
-
-def save_events(ev):
-    ensure_dirs()
-    tmp = STORE + '.tmp'
-    with open(tmp, 'w') as f:
-        json.dump(ev, f, indent=1, sort_keys=True)
-    os.replace(tmp, STORE)
 
 
 class Calendar(App):
@@ -42,7 +24,6 @@ class Calendar(App):
         super().__init__(wm, win)
         self.today = dt.date.today()
         self.sel = self.today
-        self.events = load_events()
         self.evsel = 0
         self.g_url = (wm.cfg.get('gcal_url') or '').strip()
         self.g_events = []
@@ -70,8 +51,6 @@ class Calendar(App):
             self.g_index.setdefault(o['date'], []).append(o)
         self.g_fetched = (data or {}).get('fetched', '')
         self.g_status = err or ''
-        if err:
-            self.g_status = err
         self.invalidate()
 
     def sync_gcal(self):
@@ -110,57 +89,14 @@ class Calendar(App):
         self.evsel = 0
         self.invalidate()
 
-    def day_events(self, d=None):
-        return self.events.get((d or self.sel).isoformat(), [])
-
     def has_events(self, d):
-        return d.isoformat() in self.events or d.isoformat() in self.g_index
+        return d.isoformat() in self.g_index
 
     def day_items(self, d=None):
         d = d or self.sel
-        items = []
-        for s in self.day_events(d):
-            m = TIME_RE.match(s)
-            items.append({'summary': s[m.end():] if m else s, 'raw': s, 'src': 'local',
-                          'time': m.group(1) if m else '', 'location': '', 'desc': '',
-                          'date': d.isoformat()})
-        items.extend(self.g_index.get(d.isoformat(), []))
+        items = list(self.g_index.get(d.isoformat(), []))
         items.sort(key=lambda o: (o.get('time') or '99:99', o.get('summary', '').lower()))
         return items
-
-    def add_event(self):
-        def ok(text):
-            if text and text.strip():
-                self.events.setdefault(self.sel.isoformat(), []).append(text.strip())
-                self.events[self.sel.isoformat()].sort()
-                save_events(self.events)
-                self.invalidate()
-        self.wm.prompt('New event', 'Event on %s (tip: start with a time, e.g. "14:00 Dentist")'
-                       % self.sel.strftime('%a %d %b %Y'), '', ok, parent=self.win)
-
-    def del_event(self):
-        items = self.day_items()
-        if not items:
-            return
-        i = min(self.evsel, len(items) - 1)
-        it = items[i]
-        if it['src'] != 'local':
-            self.wm.toast('Google events are read-only in monocell', 'accent')
-            return
-        local = self.day_events()
-        name = it.get('raw', it['summary'])
-        if name not in local:
-            return
-        j = local.index(name)
-
-        def yes():
-            local.pop(j)
-            if not local:
-                self.events.pop(self.sel.isoformat(), None)
-            save_events(self.events)
-            self.evsel = 0
-            self.invalidate()
-        self.wm.confirm('Delete event', 'Delete "%s"?' % name, yes, yes='Delete', parent=self.win)
 
     def show_details(self):
         items = self.day_items()
@@ -174,7 +110,7 @@ class Calendar(App):
             txt += '\nLocation: ' + it['location']
         if it.get('desc'):
             txt += '\n\n' + it['desc']
-        self.wm.message('Google Calendar' if it['src'] != 'local' else 'Event', txt, parent=self.win)
+        self.wm.message('Google Calendar', txt, parent=self.win)
 
     # ------------------------------------------------------------ drawing
     def draw(self, cv, focused):
@@ -221,25 +157,29 @@ class Calendar(App):
                 cv.fill(cx, y, cell - 1, 1, a)
                 cv.put(cx + cell - 4, y, '%2d' % d.day, a)
                 if inmonth and self.has_events(d):
-                    ext = d.isoformat() in self.g_index
                     cv.put(cx + cell - 2, y, sym('bullet', '.'), a if d == self.sel
-                           else th.c('blue' if ext else 'accent', 'win'))
+                           else th.c('blue', 'win'))
                 self.zone(cx, y, cell - 1, rh, key)
         if side:
             px = gw + 2
             pw = w - px
             cv.vline(gw, 0, h, th.c('raised', 'win'), '|')
             cv.put(px, 0, fit(self.sel.strftime('%A, %d %B'), pw), th.c('bright', 'win', 1))
+            if not self.g_url:
+                txt = 'No Google calendar configured - set "gcal_url" in Settings > Calendar.'
+                for i, ln in enumerate(wrap_text(txt, pw)):
+                    if i >= h - 3:
+                        break
+                    cv.put(px, 2 + i, ln, th.c('dim', 'win'))
             items = self.day_items()
             y = 2
-            if not items:
+            if self.g_url and not items:
                 cv.put(px, y, 'No events', th.c('dim', 'win'))
             for i, it in enumerate(items):
                 lines = wrap_text(it.get('summary', ''), pw - 9)
                 if it.get('location'):
                     lines += wrap_text('@ ' + it['location'], pw - 10)
                 on = i == min(self.evsel, len(items) - 1)
-                marker = util_dot(it['src'])
                 for j, ln in enumerate(lines):
                     if y >= h - 3:
                         break
@@ -248,14 +188,11 @@ class Calendar(App):
                     if j == 0:
                         if it.get('time'):
                             cv.put(px, y, it['time'], a)
-                        cv.put(px + 6, y, marker, a if on else th.c('blue' if it['src'] != 'local' else 'accent', 'win'))
+                        cv.put(px + 6, y, sym('arrow', '>'),
+                               a if on else th.c('blue', 'win'))
                     cv.put(px + 8, y, ln, a)
                     self.zone(px, y, pw, 1, ('e', i))
                     y += 1
-            bx = px
-            bx += button(self, cv, bx, h - 1, '+ Add', 'add', primary=True) + 1
-            if items:
-                button(self, cv, bx, h - 1, 'Delete', 'del')
             # google status
             if self.g_url and h > 6:
                 st = self.g_status or ('Google: %d events  %s' % (len(self.g_events), self.g_fetched))
@@ -264,8 +201,7 @@ class Calendar(App):
             # upcoming
             if y < h - 4:
                 y += 1
-                up = sorted(set(k for k in self.events if k > self.sel.isoformat()) |
-                            set(k for k in self.g_index if k > self.sel.isoformat()))[:max(0, h - y - 5)]
+                up = sorted(k for k in self.g_index if k > self.sel.isoformat())[:max(0, h - y - 5)]
                 if up:
                     cv.put(px, y, 'UPCOMING', th.c('dim', 'win'))
                     y += 1
@@ -279,7 +215,7 @@ class Calendar(App):
         else:
             items = self.day_items()
             if items and 3 + len(weeks) * rh < h:
-                cv.put(1, h - 1, fit('* ' + items[0].get('summary', '') +
+                cv.put(1, h - 1, fit('> ' + items[0].get('summary', '') +
                                     (' (+%d)' % (len(items) - 1) if len(items) > 1 else ''), w - 2),
                        th.c('accent', 'win'))
 
@@ -291,17 +227,11 @@ class Calendar(App):
             self.move(months=-1)
         elif key == 'today':
             self.sel = self.today
-        elif key == 'add':
-            self.add_event()
-        elif key == 'del':
-            self.del_event()
         elif key == 'sync':
             self.sync_gcal()
         elif key[0] == 'd':
             self.sel = key[1]
             self.evsel = 0
-            if ev.clicks >= 2:
-                self.add_event()
         elif key[0] == 'e':
             self.evsel = key[1]
             if ev.clicks >= 2:
@@ -327,10 +257,6 @@ class Calendar(App):
             self.move(months=1)
         elif k in ('t', 'home'):
             self.sel = self.today
-        elif k in ('n', 'a', '+'):
-            self.add_event()
-        elif k in ('delete', 'd'):
-            self.del_event()
         elif k == 'enter' and self.day_items():
             self.show_details()
         elif k in ('r', 'f5'):
@@ -342,10 +268,6 @@ class Calendar(App):
             return False
         self.invalidate()
         return True
-
-
-def util_dot(src):
-    return sym('dot', '.') if src == 'local' else sym('arrow', '>')
 
 
 APP = Calendar

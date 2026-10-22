@@ -129,9 +129,10 @@ monocell-clip --clear
 * **Sheets** – Formeln (`=SUM(A1:A5)`, `IF`, `ROUND`, …), CSV/TSV/XLSX/ODS lesen,
   CSV/XLSX/nativ schreiben, Sortieren, Spaltenbreiten.
 * **Rechner** – Ausdrücke, Funktionen, Verlauf (`2^10+sqrt(16)`).
-* **Kalender** – Monatsansicht mit ISO-Wochen, lokale Termine pro Tag (JSON) und ein
-  **Google-Calendar-Abo** über die geheime iCal-Adresse (read-only, inkl. einfacher
-  Wiederholungsregeln; Einstellungen → Calendar; Aktualisierung alle 20 Minuten).
+* **Kalender** – Monatsansicht mit ISO-Wochen, **reines Google-Calendar-Abo** über die
+  geheime iCal-Adresse (inkl. einfacher Wiederholungsregeln; Einstellungen → Calendar;
+  Aktualisierung alle 20 Minuten). Anzeigen nur – Termine werden in Google selbst
+  angelegt, in Monocell gibt es weder lokale Einträge noch Löschen.
 * **Bilder** – fünf Darstellungen: `blend` (zwei Palettenfarben pro Zelle mit
   Dichtezeichen `.:+*%#@`), `pixel` (ein geordnet geditherter Pixel pro Zelle), `grey`,
   `ascii`, `mono`; Zoom, Pan, Blättern (auch per Pfeiltasten), Vollbild. **Vollbild** (`f`
@@ -302,7 +303,8 @@ Details, Maus-/Tastaturhinweise und Deinstallation: `deploy/x61s/README.md`.
   Umlaute bleiben erhalten (abschaltbar über „Strict ASCII“).
 * Auf dem Linux-VT sind nur 8 Hintergrundfarben möglich; die Palette wird entsprechend
   umsortiert. Unter `TERM=linux` kann das Bild daher anders wirken als im Terminal.
-* Google Calendar ist **read-only** (iCal-Abo); Einträge anlegen bräuchte OAuth.
+* Google Calendar ist **reines Abo** (iCal, nur Anzeige): kein Anlegen, kein Löschen,
+  kein lokaler Speicher (`calendar.json` wird nicht mehr verwendet).
 * opencode läuft standardmäßig lokal; für eine SSH-Instanz muss der Host in den
   Einstellungen stehen und der SSH-Key hinterlegt sein. Ist er nicht erreichbar, startet
   die lokale Installation.
