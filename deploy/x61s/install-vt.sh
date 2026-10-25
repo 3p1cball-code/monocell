@@ -181,6 +181,16 @@ Rollback:
 ROLLBACK
 fi
 
+# ---------------------------------------------------------------- backlight
+if [ "$(id -u)" = 0 ]; then
+    install -m 0644 "$SRC/deploy/x61s/90-monocell-backlight.rules" \
+        /etc/udev/rules.d/90-monocell-backlight.rules
+    usermod -aG video "$USER_NAME" 2>/dev/null || true
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=backlight --action=add 2>/dev/null || true
+    echo "backlight: group video can write brightness (monocell hotkeys and Fn keys)"
+fi
+
 echo "installed to $PREFIX; launcher: $BIN/monocell"
 if [ "$KIOSK" = 1 ]; then
     echo "try it without rebooting:  sudo systemctl start monocell@$TTY && sudo chvt $TTY"

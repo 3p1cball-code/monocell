@@ -1,6 +1,7 @@
 """16-colour palette, semantic roles, presets and persistent config."""
 import json
 import os
+import re
 
 from .screen import A
 from .util import CONFIG_DIR, ensure_dirs, log
@@ -27,27 +28,151 @@ PRESETS = {
                 '1d2021', '282828', '32302f', '45403d', 'ebdbb2', 'fbf1c7', 'fe8019', 'fabd2f'],
     'Nord': ['1b1f26', 'bf616a', 'a3be8c', 'ebcb8b', '81a1c1', 'b48ead', '88c0d0', '6c7a91',
              '242933', '2e3440', '3b4252', '4c566a', 'd8dee9', 'eceff4', 'd08770', 'ebcb8b'],
-    'Matrix': ['000000', '33ff66', '7dff3a', 'ccff99', '22cc55', '66ff99', '00ffcc', '1f7a35',
-               '020803', '04120a', '07200f', '113a1e', 'a8ffbe', 'e8fff0', '33ff66', 'b4ffcc'],
+    # neutral like Ember, only the accent is green: the tint belongs to the rain,
+    # not to the whole desktop ("no global filter")
+    'Matrix': ['0c0c0c', 'e0574a', '8db86b', 'e8c26a', '6b9bd1', 'c08cc0', '6db8b4', '7c7c7c',
+               '161616', '202020', '2c2c2c', '424242', 'c4c4c4', 'f2f2f2', '8db86b', 'b8e0a0'],
     'Paper': ['9a9a9a', 'b83a2e', '3f7a2a', '9a6b00', '2f5f9e', '8a3f8a', '237878', '7a7a7a',
               'd6d3cc', 'f2efe8', 'e4e0d6', 'c9c4b8', '2b2b2b', '000000', 'd9600b', 'b04a00'],
 }
 
 ROLE_DEFAULTS = {
-    'desk': 8, 'desk_fg': 11, 'shadow': 0, 'win': 9, 'title': 10, 'raised': 10,
+    'desk': 8, 'desk_fg': 11, 'shadow': 0,
+    'win': 9, 'win_on': 10,                 # window body: inactive / focused
+    'title_on': 11, 'title_off': 9,         # title bar: focused / inactive
+    'raised': 10, 'raised_on': 11,          # buttons: elsewhere / inside the focused window
     'sel': 11, 'field': 8, 'bar': 10, 'menu': 10,
     'text': 12, 'dim': 7, 'bright': 13, 'accent': 14, 'accent2': 15, 'on_accent': 0,
     'cursor': 6,
+    'unread': 14,                           # new mail in the mail client
     'red': 1, 'green': 2, 'yellow': 3, 'blue': 4, 'magenta': 5, 'cyan': 6,
 }
 ROLE_HELP = {
-    'desk': 'Desktop background', 'desk_fg': 'Desktop logo', 'shadow': 'Window shadow',
-    'win': 'Window background', 'title': 'Active title bar', 'raised': 'Buttons / headers',
+    'desk': 'Desktop background', 'desk_fg': 'Desktop text / logo', 'shadow': 'Window shadow',
+    'win': 'Window background', 'win_on': 'Focused window background',
+    'title_on': 'Active title bar', 'title_off': 'Inactive title bar',
+    'raised': 'Buttons / headers', 'raised_on': 'Buttons in the focused window',
     'sel': 'Selection', 'field': 'Input fields', 'bar': 'Taskbar', 'menu': 'Menus',
     'text': 'Text', 'dim': 'Dim text', 'bright': 'Bright text', 'accent': 'Highlight',
     'accent2': 'Highlight 2', 'on_accent': 'Text on highlight',
-    'cursor': 'Mouse cursor',
+    'cursor': 'Mouse cursor', 'unread': 'New mail',
 }
+# element text colours that are part of the default look (the inactive title is dim)
+DEFAULT_ON = {'title_off': ROLE_DEFAULTS['dim']}
+
+# Roles that paint a surface (a background colour). A kernel VT can only show 8
+# distinct backgrounds, so `layout` puts these slots into its 8 background slots.
+# The order decides which entry gets which VT slot when a layout is derived; the
+# focused-window roles sit where the old 'title' and 'sel' were, so every derived
+# layout is the same as before they existed.
+SURFACE_ROLES = ('desk', 'win', 'win_on', 'title_on', 'title_off', 'raised_on', 'sel',
+                 'accent', 'shadow', 'field', 'bar', 'menu', 'raised')
+# version 1-3 themes: the old roles before the focused window got its own ones
+LEGACY_DEFAULTS = dict(ROLE_DEFAULTS, title=10)
+
+
+def migrate_roles(raw, on=None, preset=None):
+    """Role map and element text colours from any theme version -> (roles, on).
+
+    Up to version 3 the focused window was derived from slot numbers: its body
+    took the 'title' slot, its title bar and buttons moved one step further to
+    'sel'. Version 4 names those colours, so they can be edited one by one; the
+    migration reproduces the exact old look.
+    """
+    raw = {k: v for k, v in (raw or {}).items() if isinstance(v, int) and 0 <= v < 16}
+    on = dict(on or {})
+    if 'cursor' not in raw:
+        raw['cursor'] = PRESET_CURSOR.get(preset, ROLE_DEFAULTS['cursor'])
+    if 'win_on' not in raw:
+        base = dict(LEGACY_DEFAULTS, **raw)
+        win, title, sel = base['win'], base['title'], base['sel']
+        lift = {win: title, title: sel}         # (a shared slot went the whole way)
+        raw.update(win_on=lift[win], title_on=sel, title_off=win,
+                   raised_on=lift.get(base['raised'], base['raised']))
+        if 'title' in on:                      # v3 keyed the old title bar text 'title'
+            on['title_on'] = on.pop('title')
+        on.setdefault('title_off', base['dim'])
+    roles = dict(ROLE_DEFAULTS)
+    roles.update({k: v for k, v in raw.items() if k in ROLE_DEFAULTS})
+    return roles, clean_on(on, roles)
+
+
+def surface_slots(roles, skip=None):
+    """Palette entries that some surface paints as a background."""
+    return {roles[r] for r in SURFACE_ROLES if r != skip and r in roles}
+
+
+def assign_surface(roles, layout, role, slot):
+    """Give `role` the background `slot` -> (roles, layout).
+
+    The first 8 layout entries are the only ones a VT can paint as a background.
+    A text-only entry swaps places with a background entry that no surface uses
+    (preferably one nothing uses, then one without the body text colours). When
+    all 8 already carry a surface the theme cannot take a 9th: ValueError.
+    """
+    roles = dict(roles)
+    lay = list(layout) if valid_layout(layout) else derive_layout(roles)
+    roles[role] = slot
+    if slot in lay[:8]:
+        return roles, lay
+    used = surface_slots(roles)
+    free = [p for p in lay[:8] if p not in used]
+    if not free:
+        raise ValueError('all 8 background colours are in use')
+
+    def cost(p):
+        users = {r for r, v in roles.items() if v == p}
+        return (0 if not users else 2 if users & {'text', 'dim'} else 1, lay.index(p))
+    p = min(free, key=cost)
+    i, j = lay.index(p), lay.index(slot)
+    lay[i], lay[j] = lay[j], lay[i]
+    return roles, lay
+
+
+def derive_layout(roles):
+    """Physical palette order: [0:8] may be painted as background, [8:] is text only.
+
+    Surface roles own the low half, then 'dim' and 'text' so ordinary text stays
+    below slot 8 -- a VT renders fg >= 8 as bold, which must be opt-in.
+    """
+    lay = []
+    for role in SURFACE_ROLES + ('dim', 'text'):
+        i = roles.get(role)
+        if isinstance(i, int) and 0 <= i < 16 and i not in lay and len(lay) < 8:
+            lay.append(i)
+    return lay + [i for i in range(16) if i not in lay]
+
+
+def valid_layout(lay):
+    return isinstance(lay, list) and len(lay) == 16 and sorted(lay) == list(range(16))
+
+
+def clean_on(on, roles=None):
+    """{element role: text slot} -- the text colour that belongs to a surface.
+
+    Version 2 stored the surface *slot* as the key; pass `roles` to convert those.
+    """
+    out = {}
+    for k, v in (on or {}).items():
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= v < 16:
+            continue
+        if isinstance(k, str) and k in SURFACE_ROLES:
+            out[k] = v
+        elif roles is not None:
+            try:
+                slot = int(k)
+            except (TypeError, ValueError):
+                continue
+            for role in SURFACE_ROLES:
+                if roles.get(role) == slot:
+                    out[role] = v
+                    break
+    return out
+
 
 # a cursor colour per preset, distinct from accent and selection
 PRESET_CURSOR = {
@@ -59,6 +184,8 @@ DEFAULT_CONFIG = {
     'preset': 'Ember',
     'palette': PRESETS['Ember'],
     'roles': dict(ROLE_DEFAULTS),
+    'layout': [],                 # physical palette order; empty = derived from the roles
+    'on': dict(DEFAULT_ON),       # text colour per element {surface role: slot}
     'taskbar': 'bottom',          # bottom | top
     'frame': 'flat',              # flat | lines
     'shadows': True,
@@ -109,6 +236,85 @@ def rgb_hex(c):
     return '%02x%02x%02x' % tuple(max(0, min(255, int(v))) for v in c)
 
 
+# ---------------------------------------------------------------- theme files
+# A theme is a palette plus a full role map, stored as plain JSON so it can be
+# copied, edited or shared: {version, name, palette: [16 hex], roles: {role: slot}}
+THEME_DIR = os.path.join(CONFIG_DIR, 'themes')
+
+
+def theme_slug(name):
+    """File stem for a theme name: no path separators, stable, readable."""
+    s = re.sub(r'[^a-z0-9._-]+', '-', name.strip().lower()).strip('-._')
+    return (s or 'theme')[:48]
+
+
+def saved_themes():
+    """Saved themes as {name: {'palette', 'roles', 'path'}}; broken files are skipped."""
+    out = {}
+    try:
+        files = sorted(os.listdir(THEME_DIR))
+    except OSError:
+        return out
+    for fn in files:
+        if not fn.endswith('.json'):
+            continue
+        path = os.path.join(THEME_DIR, fn)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            pal = [rgb_hex(hex_rgb(h)) for h in data['palette']]
+            if len(pal) != 16:
+                raise ValueError('needs 16 colours')
+            roles, on = migrate_roles(data.get('roles'), data.get('on'))
+            lay = data.get('layout')
+            if not valid_layout(lay):
+                lay = derive_layout(roles)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            log('theme %s ignored: %s' % (fn, e))
+            continue
+        out[str(data.get('name') or fn[:-5])] = {'palette': pal, 'roles': roles,
+                                                 'layout': lay, 'on': on, 'path': path}
+    return out
+
+
+def save_theme(name, palette, roles, layout=None, on=None):
+    """Write palette, layout, role map and element text colours (version 4)."""
+    name = ' '.join(str(name).split())
+    if not name:
+        raise ValueError('empty name')
+    pal = [rgb_hex(hex_rgb(h)) for h in palette]
+    if len(pal) != 16:
+        raise ValueError('a theme needs 16 colours')
+    roles = {k: int(v) for k, v in roles.items() if k in ROLE_DEFAULTS}
+    lay = list(layout or [])
+    if not valid_layout(lay):
+        lay = derive_layout(dict(ROLE_DEFAULTS, **roles))
+    ensure_dirs()
+    os.makedirs(THEME_DIR, exist_ok=True)
+    path = os.path.join(THEME_DIR, theme_slug(name) + '.json')
+    data = {'version': 4, 'name': name, 'palette': pal, 'layout': lay,
+            'roles': roles,
+            'on': {k: int(v) for k, v in clean_on(on, roles).items()}}
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(data, f, indent=1)
+    os.replace(tmp, path)
+    return name
+
+
+def delete_theme(name):
+    """Remove a saved theme by display name; True when a file was removed."""
+    t = saved_themes().get(name)
+    if not t:
+        return False
+    try:
+        os.remove(t['path'])
+        return True
+    except OSError as e:
+        log('theme delete failed: %s' % e)
+        return False
+
+
 class Config(dict):
     path = os.path.join(CONFIG_DIR, 'config.json')
     # a 0.x install kept its config next to this one; read it once, then save to the new path
@@ -117,9 +323,14 @@ class Config(dict):
     def __init__(self):
         super().__init__(json.loads(json.dumps(DEFAULT_CONFIG)))
         self.overrides = {}
+        self.user_set = set()     # keys the user edited and saved; session profiles skip them
+        self._loading = False
         self.load()
+        # a fresh or inherited config has no layout yet: derive it from the roles
+        if not valid_layout(self['layout']):
+            self['layout'] = derive_layout(self['roles'])
 
-    # session overrides (e.g. --lowmem): read-only defaults that are not saved
+    # session overrides (e.g. --lowmem): defaults for values the user never set explicitly
     def __getitem__(self, key):
         if key in self.overrides:
             return self.overrides[key]
@@ -133,10 +344,14 @@ class Config(dict):
     def __setitem__(self, key, value):
         if self.overrides:
             self.overrides.pop(key, None)   # an explicit edit wins over the session profile
+        if not self._loading:
+            self.user_set.add(key)
         super().__setitem__(key, value)
 
     def set_session(self, values):
-        self.overrides.update(values)
+        for key, value in values.items():
+            if key not in self.user_set:    # the user's own settings always win
+                self.overrides[key] = value
 
     def load(self):
         try:
@@ -145,26 +360,51 @@ class Config(dict):
                 src = self.legacy
             with open(src) as f:
                 data = json.load(f)
-            roles = dict(ROLE_DEFAULTS)
-            if 'cursor' not in (data.get('roles') or {}):
-                roles['cursor'] = PRESET_CURSOR.get(data.get('preset', 'Ember'), roles['cursor'])
-            roles.update(data.get('roles', {}))
-            self.update(data)
-            self.pop('image_boost', None)
-            self['roles'] = roles
-            if len(self['palette']) != 16:
-                self['palette'] = list(PRESETS['Ember'])
+            explicit = data.pop('user_set', None)
+            if explicit is None:
+                # older config: everything that differs from the default was set by hand
+                explicit = [k for k, v in data.items()
+                            if k in DEFAULT_CONFIG and v != DEFAULT_CONFIG[k]]
+            self.user_set = set(explicit)
+            roles, on = migrate_roles(data.get('roles'), data.get('on'),
+                                      data.get('preset', 'Ember'))
+            self._loading = True
+            try:
+                self.update(data)
+                self.pop('image_boost', None)
+                self['roles'] = roles
+                if len(self['palette']) != 16:
+                    self['palette'] = list(PRESETS['Ember'])
+                self['on'] = on
+                # a saved theme file is the source of truth for its own name, so
+                # hand-editing ~/.config/monocell/themes/<name>.json takes effect
+                if self['preset'] not in PRESETS:
+                    th = saved_themes().get(self['preset'])
+                    if th:
+                        if len(th['palette']) == 16:
+                            self['palette'] = list(th['palette'])
+                        self['roles'] = dict(th['roles'])
+                        self['layout'] = th['layout']
+                        self['on'] = dict(th['on'])
+                if not valid_layout(self['layout']):
+                    self['layout'] = derive_layout(self['roles'])
+            finally:
+                self._loading = False
         except FileNotFoundError:
             pass
         except Exception as e:  # corrupt config: keep defaults
+            self._loading = False
             log('config load failed', e)
 
     def save(self):
         try:
             ensure_dirs()
             tmp = self.path + '.tmp'
+            data = dict(self)
+            data['user_set'] = sorted(self.user_set)
+            data['on'] = {k: int(v) for k, v in clean_on(self['on']).items()}
             with open(tmp, 'w') as f:
-                json.dump(dict(self), f, indent=1)
+                json.dump(data, f, indent=1)
             os.chmod(tmp, 0o600)   # may contain the calendar secret
             os.replace(tmp, self.path)
         except OSError as e:
@@ -182,6 +422,13 @@ class Theme:
         self.rgb = [hex_rgb(h) for h in self.cfg['palette']]
         self.r = dict(ROLE_DEFAULTS)
         self.r.update(self.cfg['roles'])
+        lay = list(self.cfg.get('layout') or [])
+        if not valid_layout(lay):
+            lay = derive_layout(self.r)
+            self.cfg['layout'] = lay
+        self.layout = lay
+        self.low = lay[:8]              # entries a kernel VT can paint as a background
+        self.on = clean_on(self.cfg.get('on'), self.r)
         self._cache = {}
 
     def c(self, fg, bg, fl=0):
@@ -191,12 +438,30 @@ class Theme:
         if a is None:
             f = self.r[fg] if isinstance(fg, str) else fg
             b = self.r[bg] if isinstance(bg, str) else bg
+            if fg in ('text', 'bright') and isinstance(bg, str) and bg in self.on:
+                f = self.on[bg]                    # text colour of that element
             a = A(f, b, fl)
             self._cache[k] = a
         return a
 
     def idx(self, role):
         return self.r[role]
+
+    def lift(self):
+        """Background slot -> slot inside the focused window (body and buttons)."""
+        m = {}
+        for base, up in (('raised', 'raised_on'), ('win', 'win_on')):   # body wins a tie
+            if self.r[base] != self.r[up]:
+                m[self.r[base]] = self.r[up]
+        return m
+
+    def lift_fn(self):
+        m = self.lift()
+
+        def up(a):
+            bg = (a >> 4) & 15
+            return (a & ~0xf0) | (m.get(bg, bg) << 4)
+        return up if m else None
 
     def contrast(self, slot):
         """A readable foreground role for a coloured block (e.g. the mouse cursor)."""

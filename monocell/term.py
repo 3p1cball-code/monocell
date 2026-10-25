@@ -457,30 +457,31 @@ class Terminal:
             self.mice.cols, self.mice.rows = self.w, self.h
 
     # ---------- colours ----------
+    @property
+    def exact_bg(self):
+        """True when a palette index is shown as the surface colour it names.
+
+        Only the kernel VT remaps surface colours: it has 16 text colours but just
+        8 backgrounds, so the palette is reordered and anything used as a surface
+        becomes the nearest of the eight the UI uses (see apply_palette). Every
+        other backend shows the index as programmed.
+        """
+        return self.mode != 'linux'
+
     def apply_palette(self):
         """(Re)compute colour mapping and program the terminal palette if supported."""
         th = self.theme
         self.sgr_cache = {}
         if self.mode == 'linux':
-            # which logical colours are used as backgrounds by the UI?
-            want = []
-            for role in ('desk', 'win', 'title', 'sel', 'accent', 'shadow', 'field', 'bar', 'menu', 'raised'):
-                i = th.r[role]
-                if i not in want:
-                    want.append(i)
-            for i in (0, 7, 12, 4, 1, 2, 3, 6, 5, 13, 15, 8, 9, 10, 11, 14):
-                if len(want) >= 8:
-                    break
-                if i not in want:
-                    want.append(i)
-            want = want[:8]
-            rest = [i for i in range(16) if i not in want]
-            phys = want + rest                   # phys slot -> logical
+            # the theme decides it: layout[:8] are the VT's background slots, in
+            # order, everything after that is text only
+            low = list(th.low)
+            phys = list(th.layout)               # physical slot -> logical colour
             self.perm = [0] * 16
             for p, l in enumerate(phys):
                 self.perm[l] = p
-            self.allowed_bg = want
-            self.bgmap = [i if i in want else th.nearest(th.rgb[i], want) for i in range(16)]
+            self.allowed_bg = low
+            self.bgmap = [i if i in low else th.nearest(th.rgb[i], low) for i in range(16)]
             out = ''.join('\x1b]P%X%s' % (p, '%02x%02x%02x' % th.rgb[l]) for p, l in enumerate(phys))
             self.write(out)
         else:

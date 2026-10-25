@@ -42,7 +42,8 @@ Voraussetzungen: Python ≥ 3.9, ein UTF-8-fähiges Terminal. Optional, aber emp
 `ffmpeg` (Bilder/Video/Ton), `Pillow` (schnellere Bildskalierung), `brave-browser` oder
 `chromium` (JS-Webseiten), `pw-cat`/`pacat`/`aplay` (Ton), **poppler-utils**
 (`pdftocairo`, `pdftoppm`, `pdftotext`, `pdfinfo` – PDF-Reader), `yt-dlp` (YouTube),
-`opencode` (Agent-TUI, lokal oder per SSH auf einem anderen Rechner).
+`opencode` (Agent-TUI, lokal oder per SSH auf einem anderen Rechner),
+`NetworkManager`/`nmcli` (WLAN-Auswahl und Umschalten).
 
 ## Bedienung
 
@@ -67,10 +68,30 @@ unter dem Zeiger – im Terminal durch den Scrollback, in Listen und Seiten.
 | `Ctrl+Alt+Pfeile` | verschieben |
 | `Alt+Enter` | neues Terminal |
 | `Alt+S` | Text-Screenshot als Markdown speichern |
+| `Alt+,` / `Alt+.` | Lautstärke leiser / lauter |
+| `Alt+0` | Ton stumm / wieder an |
+| `Alt+-` / `Alt++` | Helligkeit dunkler / heller |
+| `Alt+PgDn` / `Alt+PgUp` | Lautstärke leiser / lauter |
 
 Die Apps haben eigene Tasten (im Editor `Ctrl+S/O/F`, im Browser `Ctrl+L`, `Tab`,
 `Alt+←`, `Ctrl+D`, `Ctrl+F`, in der Musik `Leertaste`, `n`/`p`, `←`/`→`, …).
 `Hilfe & Tastenkürzel` im Startmenü zeigt das Wichtigste.
+
+Taskleiste: Die **Signalstärke** des WLANs steht als Balken (`)))`, `))-`, `)--`,
+`---`), Helligkeit und Lautstärke mit Prozentwert. Klick auf das Symbol öffnet
+einen Regler (Klick in den Balken, `M` stumm, `Esc` zu), das Mausrad über dem
+Symbol ändert den Wert direkt. Der Akku zeigt beim Entladen die **Restzeit**,
+beim Laden (`+` am Akkusymbol) die **Zeit bis voll**. Klick auf die **Uhr** öffnet
+eine große analoge Uhr mit Minutenstrichen und den Ziffern 12/3/6/9 (Klick oder
+`d` wechselt zur großen Digitalanzeige); das **Datum** öffnet weiterhin den
+Kalender. **Fn-Tasten** für Helligkeit und Lautstärke sowie
+**Fn+F5** (WLAN) funktionieren auf der Linux-Konsole.
+Helligkeit braucht Schreibrechte auf `/sys/class/backlight/*/brightness` – dafür
+gibt es eine udev-Regel in `deploy/x61s/`. WLAN-Netze wählen, Passwort eingeben
+und das Radio ab-/anschalten: Startmenü → System → **Network**
+(NetworkManager/`nmcli`). Bei Captive Portals (z. B. ICE-WLAN) zeigt die App
+`sign-in`; **`p`/Portal** öffnet den Browser mit der Anmeldeseite (ICE direkt
+über `wifi.bahn.de`, sonst Gateway/`neverssl.com`).
 
 ### Zwischenablage
 
@@ -150,10 +171,20 @@ monocell-clip --clear
 * **Musik** – Ordner-Playlist, Transport, Spulen, Lautstärke, Live-Spektrum
   (Goertzel-Bänder, in Python). Ton geht über PipeWire/PulseAudio/ALSA
   (`pw-cat --raw` → `pacat` → `aplay`, mit automatischem Fallback).
-* **System** – Hardware, CPU-Kerne, Speicher, Datenträger, Netz, Batterie, Temperatur,
-  Prozessliste (SIGTERM/SIGKILL) und die eigenen Fenster samt Timern/Threads.
-* **Einstellungen** – 16-Farben-Palette (RGB-Regler, Hex, Presets), Rollenfarbe pro
-  Element (inkl. Mauszeiger), Taskleiste, Rahmen, Schatten, Uhr, Hintergrund inkl.
+* **Snake** – klassisches Schlangenspiel im Zellenraster: Pfeile/WASD, Futter
+  fressen, länger werden, Highscore. `Space` pausiert, `R` startet neu.
+* **Jump** – kleiner Plattformer mit drei Leveln, Münzen, Stacheln und drei
+  Leben. Pfeile/WASD laufen, `Space`/`↑` springen, `S`/`↓` stoppen, `P` pausiert.
+  Die Level liegen als ASCII-Karten in `monocell/apps/jump.py` und lassen sich
+  dort direkt erweitern.
+* **System** – Hardware, CPU-Kerne, Speicher, Datenträger, Netz, Batterie (mit
+  Restzeit/Ladezeit), Temperatur, **Lüfterdrehzahl**, Prozessliste (SIGTERM/SIGKILL)
+  und die eigenen Fenster samt Timern/Threads.
+* **Network** – WLAN-Liste mit Signalstärke und Sicherheit, verbinden (maskierter
+  Passwort-Dialog), trennen, Radio an/aus und Rescan über NetworkManager (`nmcli`);
+  erkennt Captive Portals (`sign-in`) und öffnet sie per `p`/Portal im Browser.
+* **Einstellungen** – Erscheinungsbild-Editor im Stil von Windows 95/98 (siehe unten),
+  Taskleiste, Rahmen, Schatten, Uhr, Hintergrund inkl.
   Background-Reiter mit Regen-Dichte/-Geschwindigkeit/-Zufall, Symbole, Bild-/Video-Modus (inkl.
   ASCII-Zeichensatz), Web-Engine, Google-Calendar-Adresse, opencode-Befehl/Host.
 
@@ -164,6 +195,26 @@ per **OSC 4** live umprogrammiert (Palette in den Einstellungen ändern wirkt so
 Truecolor-Modus werden die RGB-Werte direkt gesendet. Auf dem **Linux-VT** gibt es nur
 8 Hintergrundfarben und die Palette wird per `ESC ] P` gesetzt – monocell sortiert die
 Palette dafür intern so um, dass alle Flächenfarben in den Slots 0–7 liegen.
+
+**Appearance** (Einstellungen → Appearance) funktioniert wie der Darstellungsdialog von
+Windows 95/98: oben ein kleiner Live-Desktop mit allen Elementen (Desktop, aktives und
+inaktives Fenster, Titelleisten, Buttons, Menü, Auswahl, Eingabefeld, Scrollbar,
+Fortschrittsbalken, Toast, Taskleiste, Schatten, Mauszeiger, Signalfarben). Ein Klick auf
+die **Buchstaben** eines Elements wählt dessen Textfarbe, ein Klick auf seine **Fläche**
+die Hintergrundfarbe; alternativ über die Item-Liste. Darunter stehen die 16 Farben so,
+wie ein Kernel-VT sie hat: **8 Hintergrundfarben** und **8 reine Textfarben** (rechts
+steht, wie viele der 8 Hintergründe tatsächlich von Flächen bemalt sind und wie viele der
+16 Einträge belegt sind). Klick auf
+eine Farbe = dem Element zuweisen, die RGB-Regler/Hex ändern die Farbe selbst, Rechtsklick
+= Farbe nur bearbeiten. Die 16 Farben sind gemeinsame Farbtöpfe: „used by“ zeigt, welche
+Elemente sich eine Farbe teilen. Wird eine Textfarbe als Hintergrund gewählt, tauscht
+monocell sie in die Hintergrundreihe, solange dort eine Farbe frei von Flächen ist – mehr
+als 8 Flächenfarben lehnt der Editor ab. **New colour** (Taste `n`) gibt einem Element
+eine eigene Farbe: ist noch ein Topf frei, wird die aktuelle Farbe dorthin kopiert (das
+Aussehen bleibt, danach die Regler bewegen). Sind alle 16 belegt, bietet ein Menü die
+Töpfe an (unten die, deren Verlust am wenigsten auffällt – Schatten zuerst, Text zuletzt);
+die bisherigen Nutzer wandern auf die nächstliegende Farbe. Tastatur: ↑/↓ Element,
+Leertaste Hintergrund/Text, ←/→ Farbe, `R/G/B` bzw. `r/g/b` ±8, Enter Hex.
 
 Voreinstellung „Ember“: Anthrazit/Grau plus Orange als Akzent. Weitere Presets:
 Graphite Blue, Amber CRT, Green Phosphor, CGA, Gruvbox, Nord, Paper und **Matrix**
@@ -179,8 +230,9 @@ Graphite Blue, Amber CRT, Green Phosphor, CGA, Gruvbox, Nord, Paper und **Matrix
 | `matrix` | fallende Zeichen (Halbbreiten-Katakana, auf dem VT ASCII) |
 | `auto` | Bild, falls gesetzt, sonst Matrix beim Matrix-Theme, sonst Logo |
 
-**Fenster:** Das fokussierte Fenster liegt eine Palettenstufe heller als die anderen
-(Körper und Titelleiste), damit es sich klar abhebt. Scrollbars sind bedienbar: Klick auf
+**Fenster:** Das fokussierte Fenster hat eigene Farben für Körper, Titelleiste und Buttons
+(„Window (focused)“, „Title bar (active)“, „Buttons (focused win)“); in den Presets liegt
+es eine Palettenstufe heller als die anderen. Gleiche Farbe wie „Window“ schaltet das ab. Scrollbars sind bedienbar: Klick auf
 die Leiste springt dorthin, das Ziehen des Griffs scrollt (auch über das Ende hinaus).
 **Symbole:** Einstellungen → Desktop → „Symbols“. Mit `on` (Standard in Terminals) benutzt
 die Oberfläche einbuchtige Unicode-Symbole (▤ ◉ ✉ ✎ ¶ ▦ ▣ ▶ ♪ ⚙); das Terminal holt

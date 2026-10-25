@@ -676,7 +676,7 @@ class Mail(App):
             cv.put(rx + 1 + f.depth * 2, ry, fit(icon + ' ' + label, avail),
                    a if unread else th.c('dim' if on else 'text', bg))
             if cnt:
-                cv.put(rx + rw - len(cnt), ry, cnt, th.c('accent' if not on else 'on_accent', bg, 1))
+                cv.put(rx + rw - len(cnt), ry, cnt, th.c('unread', bg, 1))
             self.zone(rx, ry, rw, 1, ('f', i))
         self.fac.draw(cv, x, y, w, h, row, th)
 
@@ -711,7 +711,8 @@ class Mail(App):
                 cv.fill(x, ry, lw, 2, th.c('bright', 'sel'))
             flags = hdr.get('flags', '')
             seen = 'S' in flags
-            fg = th.c('bright', bg, 0 if seen else 1) if not on else th.c('bright', 'sel', 1)
+            # unread mail has its own text colour (Settings > Appearance > New mail)
+            fg = th.c('bright', bg) if seen else th.c('unread', bg, 1)
             who = hdr.get('from') or hdr.get('from_addr') or '(unknown)'
             who = mail.short_name(who) if '<' in who else who
             date = mail.fmt_date(hdr.get('date'))
@@ -720,8 +721,8 @@ class Mail(App):
             if date:
                 cv.put(x + lw - len(date) - 1, ry, date,
                        th.c('on_accent', 'sel') if on else th.c('dim', 'win'))
-            subj_a = th.c('bright', 'sel') if on else (
-                th.c('bright', 'win') if not seen else th.c('text', 'win'))
+            subj_a = (th.c('unread', bg) if not seen else
+                      th.c('bright', 'sel') if on else th.c('text', 'win'))
             subj = hdr.get('subject') or ''
             if 'F' in flags:
                 subj = sym('star', '*') + ' ' + subj

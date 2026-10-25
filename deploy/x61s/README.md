@@ -11,6 +11,10 @@ ohne Desktop-Session. Das vorhandene minimale UI bleibt installiert und ist übe
   `python3`, `python3-pil`, `ffmpeg`, `poppler-utils`, `yt-dlp` (das Skript lädt zusätzlich
   die aktuelle yt-dlp-Binary nach `/usr/local/bin`, weil die Debian-Version zu alt ist)
 - Maus auf dem VT: Benutzer in der Gruppe `input` (`/dev/input/mice`)
+- Helligkeit: Benutzer in der Gruppe `video`; `install-vt.sh` legt
+  `/etc/udev/rules.d/90-monocell-backlight.rules` an, damit `monocell` (und die Fn-Tasten)
+  auf `/sys/class/backlight/*/brightness` schreiben dürfen
+- WLAN-Einstellungen (Netz wählen, Passwort, Radio): NetworkManager mit `nmcli`
 - **`gpm` muss aus sein** (es zeichnet sonst einen zweiten Mauszeiger); das Installationsskript
   deaktiviert `gpm.service` automatisch.
 
@@ -107,6 +111,14 @@ tput cols; tput lines
 # Maus:
 ls -l /dev/input/mice        # Gruppe input, lesbar
 id -nG | grep -w input
+
+# Helligkeit (Gruppe video, udev-Regel):
+ls -l /sys/class/backlight/*/brightness
+echo 12 > /sys/class/backlight/acpi_video0/brightness   # als angemeldeter Benutzer
+
+# Ton und WLAN:
+pactl get-sink-volume @DEFAULT_SINK@
+nmcli device wifi list
 
 # Speicher:
 tools/memcheck.py            # normal / --lowmem

@@ -79,11 +79,17 @@ def main(argv=None):
     signal.signal(signal.SIGCHLD, signal.SIG_DFL)
 
     term.start()
+    hotkeys = None
     try:
         os.set_blocking(0, False)
         loop.add_reader(0, on_stdin)
         if term.mice:
             loop.add_reader(term.mice.fd, on_mice)
+        try:
+            from .hotkeys import Hotkeys
+            hotkeys = Hotkeys(loop, wm.hotkey)
+        except Exception:
+            util.log('hotkeys unavailable: ' + traceback.format_exc())
         for name in [n for n in args.open.split(',') if n]:
             wm.open(name)
         for f in args.files:
@@ -102,6 +108,8 @@ def main(argv=None):
         print(tb, file=sys.stderr)
         return 1
     finally:
+        if hotkeys:
+            hotkeys.close_all()
         for win in list(wm.windows):
             try:
                 wm.close(win, force=True)

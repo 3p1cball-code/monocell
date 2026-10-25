@@ -1,10 +1,12 @@
 """System monitor: host info, CPU/memory/disk/battery, network, process list (task manager)."""
 import os
 import platform
+import re
 import signal
 import socket
 import time
 
+from .. import hardware
 from ..app import App
 from ..util import fit, human_size
 from ..widgets import ListView, button, hbar
@@ -150,6 +152,29 @@ def temperature():
     return best
 
 
+def fans():
+    txt = read('/proc/acpi/ibm/fan')
+    m = re.search(r'speed:\s*(\d+)', txt)
+    if m and int(m.group(1)) > 0:
+        return [int(m.group(1))]
+    out = []
+    try:
+        hws = sorted(os.listdir('/sys/class/hwmon'))
+    except OSError:
+        return out
+    for hw in hws:
+        base = os.path.join('/sys/class/hwmon', hw)
+        for i in range(1, 9):
+            value = read(os.path.join(base, 'fan%d_input' % i)).strip()
+            try:
+                rpm = int(value)
+            except ValueError:
+                continue
+            if rpm > 0 and rpm not in out:
+                out.append(rpm)
+    return out
+
+
 class Proc:
     __slots__ = ('pid', 'name', 'user', 'cpu', 'mem', 'ticks', 'state')
 
@@ -221,7 +246,8 @@ class System(App):
         self.every(10, self.refresh_slow)
 
     def refresh_slow(self):
-        self.slow = {'ips': ip_addrs(), 'disks': disks(), 'bat': battery()}
+        self.slow = {'ips': ip_addrs(), 'disks': disks(), 'bat': battery(),
+                     'bat_time': hardware.battery_time(), 'fans': fans()}
 
     def update(self):
         cur = cpu_times()
@@ -289,14 +315,23 @@ class System(App):
         t = temperature()
         if t is not None:
             rows.append(('Temp', '%.0f C' % t))
+        fans_ = self.slow.get('fans') or []
+        if fans_:
+            rows.append(('Fan', ' / '.join('%d' % v for v in fans_) + ' rpm'))
         for k, v in rows:
             self.kv(cv, 0, y, k, v, lw)
             y += 1
         for name, ip in self.slow.get('ips', [])[:3]:
             self.kv(cv, 0, y, name[:9], ip, lw)
             y += 1
+        bt = self.slow.get('bat_time')
         for name, cap, st, health in self.slow.get('bat', []):
-            self.kv(cv, 0, y, 'Battery', '%d%% %s%s' % (cap, st, ('  health ' + health) if health else ''), lw)
+            extra = ''
+            if bt:
+                extra = '  %s %s' % (hardware.format_minutes(bt[0]),
+                                     'to full' if bt[1] == 'charging' else 'left')
+            self.kv(cv, 0, y, 'Battery',
+                    '%d%% %s%s%s' % (cap, st, extra, ('  health ' + health) if health else ''), lw)
             y += 1
         # right column (or below): gauges
         if two:

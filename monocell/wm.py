@@ -8,6 +8,8 @@ import time
 import traceback
 
 from . import clipboard as clip
+from . import clock
+from . import hardware
 from .app import REGISTRY, load_app
 from .screen import Canvas
 from .term import Key, Mouse, Paste
@@ -176,9 +178,7 @@ class StartMenu:
             self.wm.shade(cv, x + w, y + 1, 1, h)
         cv.fill(x, y, w, h, th.c('text', 'menu'))
         cv.fill(x, y, 1, h, th.c('text', 'accent'))
-        host = self.wm.hostname
         cv.put(x + 2, y + 1, fit('monocell', 12), th.c('accent', 'menu', 1))
-        cv.put(x + w - 2 - len(host[:16]), y + 1, host[:16], th.c('dim', 'menu'))
         self.search.draw(cv, x + 2, y + 2, w - 3, th, True, bg='field')
         for i in range(self.avail):
             idx = self.top + i
@@ -271,6 +271,222 @@ class StartMenu:
         return True
 
 
+class LevelPanel:
+    """Small popup above a taskbar icon: volume or backlight level."""
+
+    def __init__(self, wm, kind, anchor):
+        self.wm = wm
+        self.th = wm.theme
+        self.kind = kind
+        self.closed = False
+        self.w = 40
+        self.h = 5
+        self.x = max(0, min(wm.w - self.w, anchor - self.w + 4))
+        self.y = wm.bar_y - self.h if wm.cfg['taskbar'] == 'bottom' else wm.bar_y + 1
+        self.y = max(0, min(self.y, wm.h - self.h))
+        self.zones = []
+        self._value = self.read()
+        self._muted = None
+        if kind == 'volume':
+            st = hardware.audio_state() or {}
+            self._muted = bool(st.get('muted'))
+
+    def read(self):
+        if self.kind == 'volume':
+            st = hardware.audio_state() or self.wm.audio or {}
+            return int(st.get('volume') or 0)
+        return self.wm.brightness if self.wm.brightness is not None else 0
+
+    def contains(self, mx, my):
+        return self.x <= mx < self.x + self.w and self.y <= my < self.y + self.h
+
+    def draw(self, cv):
+        th = self.th
+        x, y, w, h = self.x, self.y, self.w, self.h
+        if self.wm.cfg['shadows']:
+            self.wm.shade(cv, x + 1, y + h, w, 1)
+            self.wm.shade(cv, x + w, y + 1, 1, h)
+        cv.fill(x, y, w, h, th.c('text', 'menu'))
+        title = 'Volume' if self.kind == 'volume' else 'Brightness'
+        cv.put(x + 2, y, title, th.c('accent', 'menu', 1))
+        cv.put(x + w - 5, y, 'esc', th.c('dim', 'menu'))
+        segs = max(8, w - 10)
+        pct = max(0, min(100, self._value))
+        filled = int(round(segs * pct / 100.0))
+        cv.put(x + 2, y + 1, '[' + '#' * filled + '-' * (segs - filled) + ']',
+               th.c('bright', 'menu'))
+        cv.put(x + w - 5, y + 1, '%3d%%' % pct, th.c('accent', 'menu'))
+        self.zones = []
+        bx = x + 2
+        for label, key in (('[ - ]', 'down'), ('[ + ]', 'up')):
+            cv.put(bx, y + 2, label, th.c('text', 'raised'))
+            self.zones.append((bx, bx + len(label), key))
+            bx += len(label) + 1
+        if self.kind == 'volume':
+            label = '[ Unmute ]' if self._muted else '[ Mute ]'
+            cv.put(bx, y + 2, label, th.c('yellow' if self._muted else 'text', 'raised'))
+            self.zones.append((bx, bx + len(label), 'mute'))
+        cv.put(x + 2, y + 3, 'click the bar, wheel adjusts' + ('  m mute' if self.kind == 'volume' else ''),
+               th.c('dim', 'menu'))
+
+    def on_mouse(self, ev):
+        bar_x, bar_w = self.x + 2 + 1, max(8, self.w - 10)
+        if ev.kind in ('wheelup', 'wheeldown'):
+            self.step(1 if ev.kind == 'wheelup' else -1)
+            return True
+        if ev.kind in ('down', 'drag') and bar_x - 1 <= ev.x <= bar_x + bar_w and ev.y == self.y + 1:
+            self.set_fraction((ev.x - bar_x) / float(max(1, bar_w)))
+            return True
+        if ev.kind in ('move', 'drag'):
+            return True
+        if ev.kind == 'up':
+            for x0, x1, key in self.zones:
+                if x0 <= ev.x < x1 and ev.y == self.y + 2:
+                    if key == 'mute':
+                        self.wm.toggle_mute(notify=False)
+                        self._muted = not self._muted
+                        self.wm.dirty = True
+                    else:
+                        self.step(-1 if key == 'down' else 1)
+                    return True
+        return True
+
+    def on_key(self, ev):
+        k = ev.key
+        if k in ('esc', 'f12', 'alt+ '):
+            self.wm.close_popup(self)
+        elif k in ('left', 'down', 'pgdn', '-'):
+            self.step(-1)
+        elif k in ('right', 'up', 'pgup', '+'):
+            self.step(1)
+        elif k in ('home', 'end'):
+            self.set_fraction(0.0 if k == 'home' else 1.0)
+        elif k == 'm' and self.kind == 'volume':
+            self.wm.toggle_mute(notify=False)
+            self._muted = not self._muted
+            self.wm.dirty = True
+        return True
+
+    def on_paste(self, text):
+        pass
+
+    def set_fraction(self, frac):
+        frac = max(0.0, min(1.0, frac))
+        if self.kind == 'volume':
+            value = self.wm.set_volume(int(round(frac * 100)), notify=False)
+        else:
+            value = self.wm.set_brightness(int(round(frac * 100)), notify=False)
+        if value is not None:
+            self._value = value
+        self.wm.dirty = True
+
+    def step(self, d):
+        if self.kind == 'volume':
+            value = self.wm.change_volume(5 * d, notify=False)
+            if value is not None:
+                self._value = value
+            st = hardware.audio_state()
+            if st:
+                self._muted = st['muted']
+        else:
+            value = self.wm.change_brightness(d, notify=False)
+            if value is not None:
+                self._value = value
+        self.wm.dirty = True
+
+
+class ClockPanel:
+    """Taskbar clock popup: large analog face and a big digital alternative."""
+
+    def __init__(self, wm, anchor):
+        self.wm = wm
+        self.th = wm.theme
+        self.closed = False
+        self.mode = 'analog'
+        self.anchor = wm.w - 8 if anchor is None else anchor
+        self.layout()
+
+    def layout(self):
+        wm = self.wm
+        if self.mode == 'analog':
+            self.face_w, self.face_h = clock.face_size(max(17, wm.w - 10), max(9, wm.h - 6))
+            self.w = self.face_w + 8
+            self.h = self.face_h + 4
+        else:
+            self.face_w = self.face_h = 0
+            self.w = min(36, max(24, wm.w))
+            self.h = 14
+        self.x = max(0, min(wm.w - self.w, self.anchor - self.w + 4))
+        self.y = wm.bar_y - self.h if wm.cfg['taskbar'] == 'bottom' else wm.bar_y + 1
+        self.y = max(0, min(self.y, wm.h - self.h))
+
+    def contains(self, mx, my):
+        return self.x <= mx < self.x + self.w and self.y <= my < self.y + self.h
+
+    def draw(self, cv):
+        th = self.th
+        x, y, w, h = self.x, self.y, self.w, self.h
+        if self.wm.cfg['shadows']:
+            self.wm.shade(cv, x + 1, y + h, w, 1)
+            self.wm.shade(cv, x + w, y + 1, 1, h)
+        cv.fill(x, y, w, h, th.c('text', 'menu'))
+        cv.put(x + 2, y, 'Clock', th.c('accent', 'menu', 1))
+        cv.put(x + w - 5, y, 'esc', th.c('dim', 'menu'))
+        now = time.localtime()
+        h24 = self.wm.cfg['clock_24h']
+        secs = self.wm.cfg['clock_seconds']
+        date = time.strftime('%a %d %b %Y', now)
+        if self.mode == 'analog':
+            clock.draw_analog(cv, x + (w - self.face_w) // 2, y + 1, th, now,
+                              self.face_w, self.face_h)
+            fmt = '%H:%M' if h24 else '%I:%M %p'
+            if secs:
+                fmt = fmt.replace('%M', '%M:%S', 1)
+            line = time.strftime(fmt, now)
+            cv.put(x + (w - len(line)) // 2, y + self.face_h + 1, line,
+                   th.c('bright', 'menu'))
+            cv.put(x + (w - len(date)) // 2, y + self.face_h + 2, date,
+                   th.c('dim', 'menu'))
+            hint = 'd digital  esc'
+        else:
+            big = time.strftime('%H:%M' if h24 else '%I:%M', now)
+            clock.draw_digital(cv, x + (w - clock.big_width(big)) // 2, y + 1, th, big)
+            sub = ''
+            if secs:
+                sub = time.strftime(':%S' if h24 else ':%S %p', now)
+            elif not h24:
+                sub = time.strftime('%p', now)
+            if sub:
+                cv.put(x + (w - len(sub)) // 2, y + 9, sub, th.c('accent', 'menu'))
+            cv.put(x + (w - len(date)) // 2, y + 10, date, th.c('dim', 'menu'))
+            hint = 'd analog  esc'
+        cv.put(x + (w - len(hint)) // 2, y + h - 1, hint, th.c('dim', 'menu'))
+
+    def on_key(self, ev):
+        k = ev.key
+        if k in ('esc', 'f12', 'alt+ '):
+            self.wm.close_popup(self)
+        elif k in ('d', 't', 'enter'):
+            self.mode = 'digital' if self.mode == 'analog' else 'analog'
+            self.layout()
+            self.wm.dirty = True
+        elif k == 'a':
+            self.mode = 'analog'
+            self.layout()
+            self.wm.dirty = True
+        return True
+
+    def on_mouse(self, ev):
+        if ev.kind == 'up':
+            self.mode = 'digital' if self.mode == 'analog' else 'analog'
+            self.layout()
+            self.wm.dirty = True
+        return True
+
+    def on_paste(self, text):
+        pass
+
+
 class WM:
     def __init__(self, term, loop, cfg, theme):
         self.term = term
@@ -298,6 +514,7 @@ class WM:
         self.hostname = (os.environ.get('MONOCELL_HOSTNAME')
                          or socket.gethostname().split('.')[0])
         self.battery = None
+        self.battery_time = None
         self.last_frame = 0.0
         self.bar_zones = []
         self.cascade_n = 0
@@ -308,8 +525,11 @@ class WM:
         loop.every(30.0, self.read_battery)
         self.read_battery()
         self.net = None
+        self.net_signal = None
         self.bt = None
         self.sound = None
+        self.audio = None
+        self.brightness = None
         loop.every(6.0, self.refresh_tray)
         self.refresh_tray()
         self.wallpaper_cells = None
@@ -923,6 +1143,7 @@ class WM:
             if best is None or cand[0] == 'wifi':
                 best = cand
         self.net = best
+        self.net_signal = hardware.wifi_signal(best[1]) if best and best[0] == 'wifi' else None
         # bluetooth adapter + rfkill state
         bt = None
         try:
@@ -950,16 +1171,28 @@ class WM:
             self.sound = bool(pick_sinks(self.cfg.get('audio_sink', 'auto')))
         except Exception:
             self.sound = False
+        try:
+            self.audio = hardware.audio_state()
+        except Exception:
+            self.audio = None
+        try:
+            self.brightness = hardware.brightness_percent()
+        except Exception:
+            self.brightness = None
         self.dirty = True
 
     def battery_text(self):
         cap, st = self.battery
         segs = 4
         filled = max(0, min(segs, int(round(cap / 100.0 * segs))))
-        s = '[' + '=' * filled + ' ' * (segs - filled) + ']'
+        s = '[' + '#' * filled + '-' * (segs - filled) + ']'
         if st == 'Charging':
             s += '+'
-        return '%s %d%%' % (s, cap)
+        out = '%s %d%%' % (s, cap)
+        t = getattr(self, 'battery_time', None)
+        if t and t[0]:
+            out += ' ' + hardware.format_minutes(t[0])
+        return out
 
     # ---------------------------------------------------------- periodic
     def tick(self):
@@ -974,6 +1207,14 @@ class WM:
             try:
                 cap, st = fake.split(':', 1)
                 self.battery = (int(cap), st)
+                self.battery_time = None
+                ft = os.environ.get('MONOCELL_FAKE_BATTERY_TIME', '')
+                if ':' in ft:
+                    mins, mode = ft.split(':', 1)
+                    try:
+                        self.battery_time = (int(mins), mode)
+                    except ValueError:
+                        pass
                 return
             except ValueError:
                 pass
@@ -1001,6 +1242,123 @@ class WM:
         except OSError:
             pass
         self.battery = bat
+        self.battery_time = hardware.battery_time() if bat else None
+
+    # ---------------------------------------------------------- hardware controls
+    def set_volume(self, percent, notify=True):
+        value = hardware.set_volume(percent)
+        if value is None:
+            if notify:
+                self.toast('Volume control unavailable', 'yellow')
+            return None
+        self.audio = hardware.audio_state() or {'volume': value, 'muted': False, 'backend': ''}
+        if notify:
+            self.toast('Volume %d%%%s' % (self.audio['volume'],
+                                          ' (muted)' if self.audio['muted'] else ''))
+        self.dirty = True
+        self.sync_panel('volume')
+        return self.audio['volume']
+
+    def change_volume(self, delta, notify=True):
+        st = hardware.audio_state() or self.audio
+        if not st:
+            if notify:
+                self.toast('No audio output found', 'yellow')
+            return None
+        if st['muted']:
+            hardware.set_muted(False)
+        return self.set_volume(st['volume'] + delta, notify)
+
+    def toggle_mute(self, notify=True):
+        st = hardware.audio_state() or self.audio
+        if not st:
+            if notify:
+                self.toast('No audio output found', 'yellow')
+            return None
+        hardware.set_muted(not st['muted'])
+        self.audio = hardware.audio_state() or {'volume': st['volume'],
+                                                'muted': not st['muted'], 'backend': ''}
+        if notify:
+            self.toast('Sound muted' if self.audio['muted'] else 'Sound on')
+        self.dirty = True
+        self.sync_panel('volume')
+        return self.audio['muted']
+
+    def set_brightness(self, percent, notify=True):
+        value = hardware.set_brightness_percent(percent)
+        if value is None:
+            if notify:
+                self.toast('Brightness: no backlight (or no write access)', 'red')
+            return None
+        self.brightness = value
+        if notify:
+            self.toast('Brightness %d%%' % value)
+        self.dirty = True
+        self.sync_panel('brightness')
+        return value
+
+    def change_brightness(self, steps=1, notify=True):
+        value = hardware.step_brightness(steps)
+        if value is None:
+            if notify:
+                self.toast('Brightness: no backlight (or no write access)', 'red')
+            return None
+        self.brightness = value
+        if notify:
+            self.toast('Brightness %d%%' % value)
+        self.dirty = True
+        self.sync_panel('brightness')
+        return value
+
+    def sync_panel(self, kind):
+        for p in self.popups:
+            if not isinstance(p, LevelPanel) or p.kind != kind:
+                continue
+            if kind == 'volume' and self.audio:
+                p._value = self.audio['volume']
+                p._muted = bool(self.audio['muted'])
+            elif kind == 'brightness' and self.brightness is not None:
+                p._value = self.brightness
+
+    def panel_open(self, kind):
+        return any(isinstance(p, LevelPanel) and p.kind == kind for p in self.popups)
+
+    def hotkey(self, action):
+        if action == 'volume-up':
+            self.change_volume(5, notify=not self.panel_open('volume'))
+        elif action == 'volume-down':
+            self.change_volume(-5, notify=not self.panel_open('volume'))
+        elif action == 'mute':
+            self.toggle_mute(notify=not self.panel_open('volume'))
+        elif action == 'brightness-up':
+            self.change_brightness(1, notify=not self.panel_open('brightness'))
+        elif action == 'brightness-down':
+            self.change_brightness(-1, notify=not self.panel_open('brightness'))
+        elif action == 'wifi':
+            self.open('network')
+        elif action == 'battery':
+            self.open('system')
+        elif action == 'files':
+            self.open('files')
+        elif action == 'startmenu':
+            self.toggle_start()
+
+    def open_panel(self, kind, anchor=None):
+        for p in list(self.popups):
+            if isinstance(p, LevelPanel):
+                self.close_popup(p)
+                if p.kind == kind:
+                    return
+        if anchor is None:
+            anchor = self.w - 8
+        self.popup(LevelPanel(self, kind, anchor))
+
+    def open_clock(self, anchor=None):
+        for p in list(self.popups):
+            if isinstance(p, ClockPanel):
+                self.close_popup(p)
+                return
+        self.popup(ClockPanel(self, anchor if anchor is not None else self.w - 8))
 
     # ---------------------------------------------------------- drawing
     def shade(self, cv, x, y, w, h):
@@ -1098,16 +1456,18 @@ class WM:
                     log(traceback.format_exc())
                     sub.put(0, 0, 'draw error: %s' % e, th.c('red', 'win'))
             return
-        lines = self.cfg['frame'] == 'lines'
+        lines = self.cfg['frame'] == 'lines' or win.modal_for is not None
         if self.cfg['shadows'] and not win.maximized and win.snap is None:
             self.shade(cv, x + w, y + 1, 1, h)
             self.shade(cv, x + 1, y + h, w, 1)
         body = th.c('text', 'win')
         cv.fill(x, y, w, h, body)
-        tbg = 'title' if active else 'win'
+        tbg = 'title_on' if active else 'title_off'
+        tfg = 'bright' if active else 'text'      # an element text colour overrides both
         cv.fill(x, y, w, 1, th.c('text', tbg))
         if lines:
-            ba = th.c('accent' if active else 'sel', 'win')
+            # a dialog edge stays quiet: its title bar already shows that it is active
+            ba = th.c('sel' if win.modal_for is not None else 'accent' if active else 'sel', 'win')
             for yy in range(y + 1, y + h - 1):
                 cv.putc(x, yy, '|', ba)
                 cv.putc(x + w - 1, yy, '|', ba)
@@ -1117,11 +1477,11 @@ class WM:
                 cv.putc(x, y, ' ', th.c('accent', 'accent'))
         # title text
         icon = win.icon
-        cv.put(x + 2, y, icon, th.c('accent' if active else 'dim', tbg))
+        cv.put(x + 2, y, icon, th.c('accent', tbg) if active else th.c('text', tbg))
         btns = self.win_buttons(win)
         tw = btns[-1][1] - (x + 3 + len(icon)) - 1
         title = fit(win.title, max(0, tw))
-        cv.put(x + 3 + len(icon), y, title, th.c('bright' if active else 'dim', tbg, 1 if active else 0))
+        cv.put(x + 3 + len(icon), y, title, th.c(tfg, tbg, 1 if active else 0))
         hp = self.hover_part
         for part, bx0, bx1 in btns:
             hov = hp and hp[0] is win and hp[1] == part
@@ -1129,7 +1489,7 @@ class WM:
             if hov:
                 a = th.c('bright', 'red') if part == 'close' else th.c('on_accent', 'accent')
             else:
-                a = th.c('text' if active else 'dim', tbg)
+                a = th.c('text', tbg)
             cv.put(bx0, y, g, a)
         # resize grip
         if win.resizable and not win.snap:
@@ -1143,18 +1503,21 @@ class WM:
             except Exception as e:
                 log(traceback.format_exc())
                 sub.put(0, 0, 'draw error: %s' % e, th.c('red', 'win'))
-        if active:
-            # focused window sits one palette step above the others; media windows keep their colours
-            wslot, tslot, sslot = th.r['win'], th.r['title'], th.r['sel']
-            lift = {wslot: tslot, tslot: sslot}
-
-            def _up(a):
-                bg = (a >> 4) & 15
-                return (a & ~0xf0) | (lift.get(bg, bg) << 4)
-            if getattr(win.app, 'preserve_colors', False):
-                cv.recolor(x, y, w, 1, _up)
-            else:
-                cv.recolor(x, y, w, h, _up)
+        if active and not getattr(win.app, 'preserve_colors', False):
+            # the focused window has its own body and button colours (Window /
+            # Buttons "active" in the appearance editor); media windows keep theirs
+            up = th.lift_fn()
+            if up:
+                cv.recolor(x, y + 1, w, h - 1, up)
+        post = getattr(win.app, 'post_draw', None) if win.app else None
+        if post:
+            # drawn after the lift, e.g. the appearance preview with its own windows
+            sub = cv.sub(x + 1, y + 1, w - 2, h - 2)
+            try:
+                post(sub, active)
+            except Exception as e:
+                log(traceback.format_exc())
+                sub.put(0, 0, 'draw error: %s' % e, th.c('red', 'win'))
 
     def draw_taskbar(self, cv):
         th = self.theme
@@ -1174,24 +1537,33 @@ class WM:
             tray.append(('bt', sym('bt', 'B'), 'accent' if self.bt else 'dim', 'bluetooth'))
         if self.net:
             kind, name, ip = self.net
-            tray.append(('net', sym('wifi' if kind == 'wifi' else 'lan', ')))' if kind == 'wifi' else '[=]'),
-                         'accent', name))
-        if self.sound is not None:
+            if kind == 'wifi':
+                icon = hardware.signal_bars(self.net_signal) or sym('wifi', ')))')
+            else:
+                icon = sym('lan', '[=]')
+            tray.append(('net', icon, 'accent' if kind == 'wifi' else 'text', name))
+        if self.brightness is not None:
+            tray.append(('bright', '%s %d%%' % (sym('bright', '*'), self.brightness), 'text',
+                         'backlight'))
+        if self.audio:
+            vol = self.audio['volume']
+            tray.append(('sound', '%s %d%%' % (sym('sound', '~'), vol),
+                         'dim' if self.audio['muted'] else 'accent', 'volume'))
+        elif self.sound is not None:
             tray.append(('sound', sym('sound', '~'), 'accent' if self.sound else 'dim', 'audio'))
         if self.battery:
             cap, st = self.battery
             col = ('accent' if st == 'Charging' else 'red' if cap <= 15 and st == 'Discharging'
                    else 'yellow' if cap <= 30 else 'text')
             tray.append(('bat', self.battery_text(), col, 'battery'))
-        tray.append(('host', self.hostname, 'dim', 'host'))
         now = time.localtime()
         fmt = ('%H:%M:%S' if self.cfg['clock_seconds'] else '%H:%M') if self.cfg['clock_24h'] else \
               ('%I:%M:%S %p' if self.cfg['clock_seconds'] else '%I:%M %p')
         tray.append(('date', time.strftime('%a %d %b', now), 'dim', 'date'))
         tray.append(('clock', time.strftime(fmt, now), 'bright', 'clock'))
-        drop = ['date', 'host', 'bt', 'net', 'sound']
+        drop = ['date', 'bt']
         tw = sum(len(t[1]) + 2 for t in tray) + 1
-        while self.w - tw < 30 and drop:
+        while self.w - tw < 40 and drop:
             k = drop.pop(0)
             tray = [t for t in tray if t[0] != k]
             tw = sum(len(t[1]) + 2 for t in tray) + 1
@@ -1302,6 +1674,21 @@ class WM:
             return
         if k == 'alt+s':
             self.save_text_shot()
+            return
+        if k in ('alt+,', 'alt+pgdn'):
+            self.change_volume(-5, notify=not self.panel_open('volume'))
+            return
+        if k in ('alt+.', 'alt+pgup'):
+            self.change_volume(5, notify=not self.panel_open('volume'))
+            return
+        if k == 'alt+0':
+            self.toggle_mute(notify=not self.panel_open('volume'))
+            return
+        if k == 'alt+-':
+            self.change_brightness(-1, notify=not self.panel_open('brightness'))
+            return
+        if k in ('alt++', 'alt+='):
+            self.change_brightness(1, notify=not self.panel_open('brightness'))
             return
         if self.popups:
             p = self.popups[-1]
@@ -1501,7 +1888,13 @@ class WM:
             if ev.kind == 'down':
                 self.bar_click(key, ev)
             elif ev.kind in ('wheelup', 'wheeldown'):
-                self.cycle(1 if ev.kind == 'wheeldown' else -1)
+                d = 1 if ev.kind == 'wheelup' else -1
+                if key == 'sound':
+                    self.change_volume(5 * d)
+                elif key == 'bright':
+                    self.change_brightness(d)
+                else:
+                    self.cycle(1 if ev.kind == 'wheeldown' else -1)
             return
         win = self.window_at(mx, my)
         if win is None:
@@ -1582,19 +1975,24 @@ class WM:
                 self.minimize(key)
             else:
                 self.activate(key)
-        elif key in ('clock', 'date'):
+        elif key == 'clock':
+            self.open_clock(ev.x)
+        elif key == 'date':
             self.open('calendar')
-        elif key in ('bat', 'host'):
+        elif key == 'bat':
             self.open('system')
         elif key == 'net':
             kind, name, ip = self.net
-            self.toast('%s %s%s' % ('WiFi' if kind == 'wifi' else 'LAN', name, ('  ' + ip) if ip else ''))
+            if kind == 'wifi':
+                self.open('network')
+            else:
+                self.toast('LAN %s%s' % (name, ('  ' + ip) if ip else ''))
         elif key == 'bt':
             self.toast('Bluetooth: ' + ('on' if self.bt else 'off'))
+        elif key == 'bright':
+            self.open_panel('brightness', ev.x)
         elif key == 'sound':
-            from .audio import pick_sinks
-            sinks = pick_sinks(self.cfg.get('audio_sink', 'auto'))
-            self.toast('Audio: ' + (', '.join(sinks) if sinks else 'no output found'))
+            self.open_panel('volume', ev.x)
 
     def do_drag(self, ev):
         d = self.drag
@@ -1747,6 +2145,13 @@ Alt+M / F11       maximize         Alt+D  show desktop
 Alt+Left/Right    snap half        Alt+T  tile all
 Alt+Shift+Arrows  resize           Ctrl+Alt+Arrows  move
 Alt+Enter         new terminal     Alt+S  text screenshot (.md)
+Alt+, / Alt+.     volume down/up   Alt+0  mute
+Alt+-, / Alt++    brightness down/up
+Alt+PgUp / Alt+PgDn  volume up/down
+Taskbar: click the signal bars for wifi, brightness or sound for a level popup;
+the mouse wheel over those icons adjusts the level.  Click the clock for a large
+analog clock (d or a click toggles to big digits); the date still opens the
+calendar.  Fn brightness/volume keys and Fn+F5 (wifi) work on the Linux console.
 
 Hold the middle button and move the mouse/trackpoint to scroll the window
 under the pointer.  Copy & paste: Shift+drag selects text in any window and

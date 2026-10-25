@@ -23,7 +23,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from monocell.vt import VTScreen, DEF, F_UL, F_REV  # noqa: E402
+from monocell.vt import VTScreen, DEF, F_BOLD, F_UL, F_REV  # noqa: E402
 from monocell.theme import PRESETS, hex_rgb  # noqa: E402
 
 FONT = '/usr/share/fonts/nerd-fonts/Terminus/TerminessNerdFontMono-Regular.ttf'
@@ -166,6 +166,8 @@ def render(vt, path, font_path=FONT, px=16):
             fg, bg, fl = a & 31, (a >> 5) & 31, a >> 10
             fg = 12 if fg == DEF else fg
             bg = 0 if bg == DEF else bg
+            if fl & F_BOLD and fg < 8:
+                fg += 8          # a kernel VT renders bold as the bright foreground
             if fl & F_REV:
                 fg, bg = bg, fg
             x0, y0 = x * cw, y * chh
