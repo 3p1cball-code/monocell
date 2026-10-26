@@ -160,6 +160,7 @@ REGISTRY = [
     ('snake', 'snake', 'Snake', '[S]', 'Classic snake', 'Games'),
     ('jump', 'jump', 'Jump', '[J]', 'Tiny platformer', 'Games'),
     ('system', 'system', 'System', '[i]', 'System monitor', 'System'),
+    ('bench', 'bench', 'Pi Benchmark', '[%]', 'CPU load with temp & fan graphs', 'System'),
     ('network', 'network', 'Network', ')))', 'Wi-Fi networks & signal', 'System'),
     ('kdeconnect', 'kdeconnect', 'KDE Connect', '[K]', 'Clipboard & file transfer', 'System'),
     ('settings', 'settings', 'Settings', '{o}', 'Settings', 'System'),

@@ -1,4 +1,4 @@
-"""Hardware controls without extra dependencies: backlight, sound volume, wifi signal."""
+"""Hardware controls without extra dependencies: backlight, volume, wifi, sensors."""
 import os
 import re
 import socket
@@ -213,6 +213,92 @@ def _int(path):
         return int(_read(path))
     except ValueError:
         return 0
+
+
+# ------------------------------------------------------------------ sensors
+HWMON = '/sys/class/hwmon'
+
+
+def _hwmon_names():
+    try:
+        names = sorted(os.listdir(HWMON))
+    except OSError:
+        return []
+    return [(n, _read(os.path.join(HWMON, n, 'name'))) for n in names]
+
+
+def cpu_cores():
+    """[(label, celsius), ...] per CPU core from coretemp, or [].
+
+    Falls back to the single 'CPU' sensor of thinkpad_acpi (one entry, label
+    'cpu'); the ACPI thermal zones are deliberately not used here, they are
+    coarse and identical to the thinkpad sensor anyway.
+    """
+    for name, driver in _hwmon_names():
+        if driver != 'coretemp':
+            continue
+        out = []
+        base = os.path.join(HWMON, name)
+        for i in range(1, 9):
+            raw = _read(os.path.join(base, 'temp%d_input' % i))
+            try:
+                value = int(raw) / 1000.0
+            except ValueError:
+                continue
+            label = _read(os.path.join(base, 'temp%d_label' % i)).lower().replace(' ', '')
+            out.append((label or 'core%d' % (i - 1), value))
+        if out:
+            return out
+    for name, driver in _hwmon_names():
+        if driver != 'thinkpad':
+            continue
+        base = os.path.join(HWMON, name)
+        for i in range(1, 5):
+            if _read(os.path.join(base, 'temp%d_label' % i)).lower() != 'cpu':
+                continue
+            try:
+                return [('cpu', int(_read(os.path.join(base, 'temp%d_input' % i))) / 1000.0)]
+            except ValueError:
+                continue
+    return []
+
+
+def cpu_temp():
+    """Hottest CPU core in degrees Celsius, or None."""
+    cores = cpu_cores()
+    if cores:
+        return max(v for _, v in cores)
+    best = None
+    try:
+        zones = sorted(os.listdir('/sys/class/thermal'))
+    except OSError:
+        return None
+    for zone in zones:
+        if not zone.startswith('thermal_zone'):
+            continue
+        try:
+            value = int(_read(os.path.join('/sys/class/thermal', zone, 'temp'))) / 1000.0
+        except ValueError:
+            continue
+        if best is None or value > best:
+            best = value
+    return best
+
+
+def fan_rpm():
+    """Current fan speed in rpm, or None."""
+    m = re.search(r'speed:\s*(\d+)', _read('/proc/acpi/ibm/fan'))
+    if m and int(m.group(1)) > 0:
+        return int(m.group(1))
+    for name, _ in _hwmon_names():
+        for i in (1, 2):
+            try:
+                rpm = int(_read(os.path.join(HWMON, name, 'fan%d_input' % i)))
+            except ValueError:
+                continue
+            if rpm > 0:
+                return rpm
+    return None
 
 
 def battery_time(base=None):

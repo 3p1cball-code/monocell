@@ -136,22 +136,6 @@ def battery():
     return out
 
 
-def temperature():
-    best = None
-    base = '/sys/class/thermal'
-    try:
-        for n in os.listdir(base):
-            if n.startswith('thermal_zone'):
-                t = read(os.path.join(base, n, 'temp')).strip()
-                if t:
-                    v = int(t) / 1000.0
-                    if best is None or v > best:
-                        best = v
-    except (OSError, ValueError):
-        pass
-    return best
-
-
 def fans():
     txt = read('/proc/acpi/ibm/fan')
     m = re.search(r'speed:\s*(\d+)', txt)
@@ -312,9 +296,17 @@ class System(App):
         rows = [('Host', s['host']), ('OS', s['os']), ('Kernel', '%s (%s)' % (s['kernel'], s['arch'])),
                 ('CPU', '%s x%d' % (s['cpu'], s['cores'])), ('Uptime', uptime()),
                 ('Terminal', '%dx%d  %s' % (self.wm.w, self.wm.h, self.wm.term.mode))]
-        t = temperature()
-        if t is not None:
-            rows.append(('Temp', '%.0f C' % t))
+        cores = hardware.cpu_cores()
+        if cores:
+            if len(cores) <= 2:
+                text = '  '.join('%s %.0f C' % (n, v) for n, v in cores)
+            else:
+                text = 'max %.0f C  (%d cores)' % (max(v for _, v in cores), len(cores))
+            rows.append(('Temp', text))
+        else:
+            t = hardware.cpu_temp()
+            if t is not None:
+                rows.append(('Temp', '%.0f C' % t))
         fans_ = self.slow.get('fans') or []
         if fans_:
             rows.append(('Fan', ' / '.join('%d' % v for v in fans_) + ' rpm'))
