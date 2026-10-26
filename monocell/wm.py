@@ -495,6 +495,7 @@ class WM:
         self.theme = theme
         self.windows = []        # z-order, last = top
         self.focus = None
+        self.gfx = None          # app that owns the screen in graphics mode (fbmode)
         self.popups = []
         self.toasts = []
         self.dirty = True
@@ -1323,7 +1324,22 @@ class WM:
     def panel_open(self, kind):
         return any(isinstance(p, LevelPanel) and p.kind == kind for p in self.popups)
 
+    # ---------------------------------------------------------- graphics mode
+    def enter_gfx(self, app):
+        """`app` draws into the framebuffer itself: no text rendering, all input to it."""
+        self.gfx = app
+        self.close_popup()
+
+    def leave_gfx(self):
+        self.gfx = None
+        self.term.front = None            # the text screen was gone: repaint everything
+        self.term.apply_palette()
+        self.dirty = True
+
     def hotkey(self, action):
+        if self.gfx and action not in ('volume-up', 'volume-down', 'mute',
+                                       'brightness-up', 'brightness-down'):
+            return                        # nothing that opens a (now invisible) window
         if action == 'volume-up':
             self.change_volume(5, notify=not self.panel_open('volume'))
         elif action == 'volume-down':
@@ -1369,6 +1385,8 @@ class WM:
         cv.recolor(x, y, w, h, lambda a: dimf | (sh << 4))
 
     def render(self):
+        if self.gfx:
+            return                        # the framebuffer belongs to the graphics app
         th = self.theme
         buf = self.term.back
         cv = Canvas(buf)
@@ -1652,6 +1670,18 @@ class WM:
     # ---------------------------------------------------------- events
     def handle(self, ev):
         try:
+            if self.gfx:
+                app = self.gfx
+                if app.win.closed:
+                    self.leave_gfx()
+                elif isinstance(ev, Key):
+                    app.on_key(ev)
+                    return
+                elif isinstance(ev, Mouse):
+                    app.on_mouse(ev)
+                    return
+                else:
+                    return
             if isinstance(ev, Mouse):
                 self.handle_mouse(ev)
             elif isinstance(ev, Key):

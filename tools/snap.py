@@ -6,7 +6,7 @@ emulated screen (monocell's own VT parser, palette taken from the OSC 4 stream).
 usage: snap.py COLSxROWS "script" [--args "--open files"] [--out DIR] [--font PATH] [--px 16]
 
 script: actions separated by ';'
-  wait S | key NAME | type TEXT | click X Y | rclick X Y | dclick X Y
+  wait S | sh CMD | key NAME | type TEXT | click X Y | rclick X Y | dclick X Y
   drag X1 Y1 X2 Y2 | mdrag X1 Y1 X2 Y2 | sdrag X1 Y1 X2 Y2 (shift) | mclick X Y | move X Y | wheel up|down X Y | shot NAME | paste TEXT
 """
 import argparse
@@ -16,6 +16,7 @@ import select
 import shlex
 import signal
 import struct
+import subprocess
 import fcntl
 import sys
 import termios
@@ -226,6 +227,8 @@ def main():
             nums = [int(v) for v in arg.split()] if cmd in ('click', 'rclick', 'dclick', 'mclick', 'drag', 'mdrag', 'sdrag', 'move', 'down', 'up') else []
             if cmd == 'wait':
                 time.sleep(float(arg))
+            elif cmd == 'sh':                       # e.g. grab the fake framebuffer mid-run
+                subprocess.run(arg, shell=True)
             elif cmd == 'key':
                 for k in arg.split():
                     r.send(r.vt.encode_key(k.replace('SPACE', ' ') if k != 'space' else ' ',

@@ -40,6 +40,11 @@ OPTIONS = {
         ('av_offset', 'A/V offset ms (negative = picture earlier)',
          [-160, -120, -80, -40, 0, 40, 80, 120]),
         ('audio_sink', 'Audio output', ['auto', 'pacat', 'pw-cat', 'aplay']),
+        ('gfx_look', 'Graphics mode look (g in the player)',
+         ['vga', 'ega', 'theme', 'cga', 'amber', 'green']),
+        ('gfx_dither', 'Graphics dithering', ['bayer', 'none']),
+        ('gfx_scanlines', 'Graphics scanlines', [False, True]),
+        ('gfx_fps', 'Graphics frame rate (0 = auto)', [0, 12, 15, 20, 25, 30]),
     ],
     'web': [
         ('web_engine', 'Engine', ['auto', 'lite', 'chromium']),

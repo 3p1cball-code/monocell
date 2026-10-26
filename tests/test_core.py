@@ -705,6 +705,9 @@ class TestThemeLayout(unittest.TestCase):
         self.assertLess(lay.index(theme.ROLE_DEFAULTS['dim']), 8)
 
     def test_config_derives_layout_when_missing(self):
+        old = Config.path
+        Config.path = os.path.join(tempfile.mkdtemp(), 'none.json')   # not the user's config
+        self.addCleanup(setattr, Config, 'path', old)
         cfg = Config()
         self.assertTrue(theme.valid_layout(cfg['layout']))
         self.assertEqual(cfg['layout'], theme.derive_layout(cfg['roles']))

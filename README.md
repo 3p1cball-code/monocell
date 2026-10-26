@@ -165,6 +165,37 @@ monocell-clip --clear
 * **Video** – ffmpeg dekodiert direkt auf Zellauflösung; im randlosen Vollbild wird die
   volle Bildfläche als Zellen genutzt. Ton läuft parallel über die Audio-Pipeline (die
   auch die Master-Uhr stellt).
+  **Grafikmodus** (`g` oder `Gfx`, nur auf der Linux-Konsole): wie ein DOS-Spiel verlässt
+  monocell den Textmodus – die Konsole wird per `KDSETMODE` auf `KD_GRAPHICS` gestellt und
+  das Video landet direkt im Framebuffer (`/dev/fb0`), als harte Pixel in einem Viertel
+  der Bildschirmauflösung (X61s: 256×192), hochskaliert per Nearest Neighbour – jeder
+  Bildpunkt ist ein 4×4-Block. Looks nach echten PC-Grafikkarten und Monitoren, alle mit
+  geordnetem Bayer-Dithering:
+
+  | Look | Farben |
+  |---|---|
+  | `VGA 256` | 256, eine Palette pro Video – aus den Keyframes der ersten 90 s berechnet (2 s, mit `nice`, gecacht), wie die eine Palette eines DOS-Spiels |
+  | `EGA 16` | die 16 EGA-Farben |
+  | `THEME 16` | die 16 Farben des Desktop-Themes |
+  | `CGA 4` | Schwarz, Magenta, Cyan, Weiß – nach Helligkeit verteilt |
+  | `AMBER` | Bernstein-Monitor: Schwarz, Glimmen, Bernstein, Lichter brennen fast weiß aus |
+  | `GREEN` | grüner Phosphor-Monitor, ebenso mit fast weißen Lichtern |
+
+  Tasten im Grafikmodus: `c` Look, `d` Dithering an/aus, `s` Scanlines,
+  `Leertaste`/Klick Pause, Pfeile spulen, `+`/`-` Lautstärke, `g`/`Esc` zurück zum Desktop.
+  Ein OSD in 3×5-Pixelschrift zeigt Zeit und Modus; es wird im Speicher in das Bild
+  gesetzt und mit ihm in einem Schreibvorgang ausgegeben, damit es nicht flackert. Die
+  ganze Pixelarbeit macht ffmpeg in C (Python kopiert nur fertige Frames); 25 fps hält der
+  X61s auch bei 1080p mit Ton. Fällt das Bild mehr als 3 s hinter den Ton, startet nur der
+  Bild-Decoder neu (der Ton läuft weiter, höchstens alle 10 s); passiert das zweimal in
+  30 s, sinkt die Bildrate in 5er-Schritten, statt dauernd nachzuziehen.
+  **Achtung Netzwerk:** Die Palette nie aus der ganzen Datei berechnen, wenn sie auf einem
+  Share liegt – 188 MB über CIFS zu lesen kostet mehr, als das Abspielen selbst braucht
+  (gemessen: 16 statt 24 fps). Deshalb nur ein Ausschnitt und mit `nice`.
+  Ein Absturz kann die Konsole nicht dunkel lassen: beim Beenden und beim nächsten Start
+  wird `KD_TEXT` gesetzt. Einstellungen → Images & video, Messwerte im Log
+  (`gfx: … frames/s shown`). `python3 -m monocell.fbmode VIDEO OUT.png --look cga`
+  rendert ein Standbild durch dieselbe Pipeline.
 * **YouTube** – Suche über `yt-dlp` (auch Video-Links), Ergebnisliste mit Thumbnail,
   Kanal, Dauer und Aufrufen; Wiedergabe lädt max. 480p in den Cache und öffnet den
   Video-Player. Kein Konto, keine API; `yt-dlp` sollte aktuell sein.
@@ -275,7 +306,8 @@ Für UTF-8-Eingabe (Umlaute) auf der Konsole: `sudo kbd_mode -u` (dauerhaft z. B
 
 Für eine schärfere Schrift auf dem VT: `sudo setfont ter-116n` (kbd/fonts-Paket) und
 `sudo dpkg-reconfigure console-setup`. monocell braucht kein `gpm`, kein X, kein
-Framebuffer-Programm – nur eine Konsole mit ANSI-Farben.
+Framebuffer-Programm – nur eine Konsole mit ANSI-Farben. Für den Grafikmodus des
+Videoplayers muss der Benutzer in der Gruppe `video` sein (Schreibrecht auf `/dev/fb0`).
 
 ## Architektur
 
@@ -293,11 +325,13 @@ monocell/
   formula.py   sichere Ausdrucksauswertung (kein eval)
   imaging.py   Dekoder (Pillow/ffmpeg/eigenes PNG/PPM/BMP) + Dithering-Modi
   audio.py     ffmpeg→PCM, Taktung in die Senke, Spektrum
+  fbmode.py    Grafikmodus: KD_GRAPHICS, Framebuffer, ffmpeg-Filtergraphen der Looks,
+               OSD mit 3x5-Pixelschrift
   vt.py        VT-Emulator (auch vom Test-Harness benutzt)
   web.py       lite- und CDP-Engine, DOM→Blockmodell
   gcal.py      iCalendar-Abo (Google Calendar) mit RRULE-Expansion und Cache
   apps/        files browser terminal editor writer sheet pdf calc calendar viewer
-               video music system settings opencode
+               video music system bench settings appearance opencode snake jump …
 tools/
   snap.py      Headless-Harness: PTY + VT-Parser + PNG-Renderer, Skripte aus Tasten/Maus
   imgtest.py   Bildpipeline offline testen

@@ -419,6 +419,8 @@ class Terminal:
         seq = '\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[2J'
         self.write(seq)
         if self.mode == 'linux':
+            from . import fbmode
+            fbmode.ensure_text(self.fd_out)    # an earlier run may have died in graphics mode
             try:
                 self.mice = MiceReader(self.w, self.h)
             except OSError:
@@ -426,6 +428,9 @@ class Terminal:
         self.apply_palette()
 
     def stop(self):
+        if self.mode == 'linux':
+            from . import fbmode
+            fbmode.restore()                   # never leave the console in graphics mode
         out = '\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l\x1b[?2004l\x1b[0m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[?1049l'
         if self.mode == 'palette':
             out += '\x1b]104\x1b\\'

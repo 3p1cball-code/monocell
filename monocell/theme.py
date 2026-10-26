@@ -203,6 +203,10 @@ DEFAULT_CONFIG = {
     'image_mode': 'blend',        # blend | pixel | ascii | mono
     'dither': 'bayer4',           # bayer4 | bayer8 | fs | none
     'video_mode': 'pixel',
+    'gfx_look': 'vga',            # graphics mode (Linux console): vga|ega|theme|cga|amber|green
+    'gfx_dither': 'bayer',        # bayer | none
+    'gfx_scanlines': False,
+    'gfx_fps': 0,                 # 0 = auto (25; never above the video's own rate)
     'cell_aspect': 0.0,           # 0 = auto (h/w ratio of a cell, usually ~2)
     'video_fps': 15,
     'av_offset': 0,               # ms; negative shows the picture earlier than the sound
