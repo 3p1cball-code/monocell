@@ -13,13 +13,15 @@ Hardware (getestet gegen ein ThinkPad X61s mit 1024×768).
 | ![Image viewer](screenshots/image-viewer.png) | ![PDF reader](screenshots/pdf.png) |
 | ![Matrix rain](screenshots/matrix.png) | ![Paper theme](screenshots/paper.png) |
 
-**Grafikmodus** – OpenStreetMap im Framebuffer, dieselben Looks wie der Videoplayer:
+**Grafikmodus** – dieselben Looks wie der Videoplayer, für Karte und Bilder:
 
-![Maps im Grafikmodus](screenshots/maps.png)
+| | |
+|---|---|
+| ![Maps im Grafikmodus](screenshots/maps.png) | ![Bild im Grafikmodus](screenshots/viewer-gfx.png) |
 
-*Screenshots aus dem Demo-Home, 120–160 Spalten (die Karte ist ein Abbild des
-Framebuffers). Die Fensterrahmen skalieren mit dem Terminal; alles hier ist echte
-Ausgabe, keine Mockups.*
+*Screenshots aus dem Demo-Home, 120–160 Spalten (die beiden Grafikmodus-Bilder sind
+Abbilder des Framebuffers; das Motiv ist „The Blue Marble", NASA, gemeinfrei). Die
+Fensterrahmen skalieren mit dem Terminal; alles hier ist echte Ausgabe, keine Mockups.*
 
 **Text-Screenshot:** `Alt+S` speichert zwei Dateien in `~/monocell-shots/`:
 `…md` mit dem Bild als reinem Text (lesbar in Kate, GitHub und jedem Editor) und
@@ -122,7 +124,19 @@ monocell-clip --clear
 ## Anwendungen
 
 * **Dateien** – navigieren, kopieren/ausschneiden/einfügen, umbenennen, Papierkorb
-  (freedesktop), neue Ordner/Dateien, Vorschau (Text/Bild), Öffnen mit …
+  (freedesktop), neue Ordner/Dateien, Vorschau (Text/Bild), Öffnen mit … Der zuletzt
+  geöffnete Ordner wird gemerkt (`files_dir` in der Konfiguration) und beim nächsten
+  Start wieder geöffnet; ist er inzwischen weg, geht es nach `~`. Links unter PLACES
+  stehen die **Wechselmedien** (USB-Stick, SD-Karte, CF/Microdrive): Klick mountet ein
+  nicht gemountetes Medium und springt hinein, Rechtsklick bietet Mount/Unmount,
+  gemountete sind normal, ungemountete gedimmt. Siehe *Wechselmedien* unten.
+  **Kopieren/Verschieben zeigt Fortschritt** in der Statuszeile: Dateien gezählt,
+  Balken, Prozent, Größe und der aktuelle Name, dazu ein **Stop**-Knopf. Die Größen
+  werden vorher zusammengezählt, damit der Balken stimmt; abgebrochene Kopien werden
+  weggeräumt (fertige Dateien bleiben), ein Wechsel auf ein anderes Laufwerk läuft
+  als Kopie mit Fortschritt, innerhalb eines Laufwerks ist Verschieben ein Rename.
+  Der Kopiervorgang läuft im Hintergrund weiter, auch wenn man im Dateimanager
+  weiterblättert.
 * **Browser** – zwei Engines: `lite` (urllib + HTML-Parser, ohne JavaScript, sehr schnell)
   und **Chromium/Brave headless über das DevTools-Protokoll** (JavaScript/SPA). Die
   Chromium-Engine startet schon beim Öffnen des Fensters, blockiert Schriften, Medien und
@@ -167,6 +181,14 @@ monocell-clip --clear
   `ascii`, `mono`; Zoom, Pan, Blättern (auch per Pfeiltasten), Vollbild. **Vollbild** (`f`
   oder `Full`) zeigt das Bild randlos in der **größten Textauflösung** (eine Zelle pro
   Bildpixel, gewählter Modus, 16 Farben); `Esc` oder `F` kehrt zurück.
+  **Grafikmodus** (`g` oder `Gfx`, nur auf der Linux-Konsole): dasselbe Bild als echte
+  Pixel im Framebuffer, durch dieselbe Kette wie der Videoplayer, mit denselben Looks
+  (`c`), Dithering (`d`) und Scanlines (`s`). Für `VGA 256` wird eine Palette aus dem
+  Bild selbst gerechnet (aus dem schon geladenen Bild, gecacht wie beim Video) – bis sie
+  fertig ist, läuft der 6×7×6-Würfel. `+`/`-` und Mausrad zoomen (bis 16×, aus dem
+  Original gecroppt statt hochskaliert), Pfeile panen, `0`/`z` passt wieder ein,
+  `n`/`p`/`Leertaste` blättern, `g`/`Esc` zurück. Fit und Zoom rechnen auf dem Canvas
+  (256×192), damit das Bild bei jedem Zoom scharf aus der Quelle kommt.
 * **Video** – ffmpeg dekodiert direkt auf Zellauflösung; im randlosen Vollbild wird die
   volle Bildfläche als Zellen genutzt. Ton läuft parallel über die Audio-Pipeline (die
   auch die Master-Uhr stellt).
@@ -251,6 +273,37 @@ monocell-clip --clear
   Taskleiste, Rahmen, Schatten, Uhr, Hintergrund inkl.
   Background-Reiter mit Regen-Dichte/-Geschwindigkeit/-Zufall, Symbole, Bild-/Video-Modus (inkl.
   ASCII-Zeichensatz), Web-Engine, Google-Calendar-Adresse, opencode-Befehl/Host.
+
+## Wechselmedien
+
+Steckt ein USB-Stick, eine SD-Karte oder ein Microdrive im PC-Card-Schacht, fragt
+Monocell einmal pro Gerät: **„Removable medium – … – Mount it now?"** mit *Mount* und
+*Not now* (abschaltbar in Einstellungen → Desktop). Gemountet wird über **udisks2**
+(`udisksctl`): Mountpoint unter `/media/<benutzer>/<LABEL>`, Rechte für vfat/ntfs,
+fstab-Regeln beachtet – das ist derselbe Weg, den eine Desktop-Umgebung nimmt.
+Erkannt wird über `lsblk` (alle 4 s im Hintergrund): alles mit Dateisystem, was
+entfernbar ist (RM-Flag, Hotplug oder USB/mmc/PC-Card-Bus). Die Systemplatte und ihre
+Partitionen sind ausgeschlossen, Swap und CD-ROMs ohne Medium ebenso.
+
+Abgemeldet wird im Dateimanager per Rechtsklick auf das Laufwerk („Unmount“); war man
+gerade darin, springt die Ansicht nach `~`, damit kein toter Pfad stehen bleibt. Ein
+busy-Fehler (Datei noch offen) kommt als Toast. Auf dem X61s erlaubt die Polkit-Regel
+`50-monocell-media.rules` (aus `deploy/x61s/install-login.sh`) das Mounten ohne
+Passwort-Agent – auf der Konsole gibt es keinen.
+
+**Langsame Karten:** FAT schreibt beim `close` alle schmutzigen Seiten der Partition
+zurück (Mountoption `flush`). Eine 188-MB-Datei auf einem CF-Microdrive in PIO2 braucht
+dafür Minuten – wer Monocell währenddessen beendet, lässt einen Thread in Disk-Sleep
+zurück, und der Prozess kann erst sterben, wenn der Kernel die Seiten los ist (die
+Login-Aufforderung kommt erst danach). Deshalb fragt Monocell beim Beenden/Rebooten,
+wenn noch eine Kopie läuft („Copy still running … Stop and exit“), und **nur auf
+solchen Dateisystemen** (vfat/exfat/ntfs bzw. Mountoption `flush`) macht der
+Kopiervorgang alle 8 MB ein `fsync`, damit beim Schließen nie mehr viel offen ist. Auf
+ext4/tmpfs wäre das nur Ballast: dort kehrt `close` sofort zurück, und ein fsync alle
+8 MB machte eine Kopie auf dem X61s fünfmal langsamer (5,6 s statt 0,9 s für 300 MB).
+Kopiert wird über `sendfile`, also so schnell wie `shutil.copy2`; vor dem ersten Byte
+wird geprüft, ob der Platz reicht („not enough space“, statt nach Minuten mit ENOSPC
+abzubrechen).
 
 ## Farben und Darstellung
 
