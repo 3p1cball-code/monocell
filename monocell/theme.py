@@ -207,6 +207,10 @@ DEFAULT_CONFIG = {
     'gfx_dither': 'bayer',        # bayer | none
     'gfx_scanlines': False,
     'gfx_fps': 0,                 # 0 = auto (25; never above the video's own rate)
+    'map_tiles': 'osm',           # osm|osmde|light|dark|topo or an own {z}/{x}/{y} URL
+    'map_lat': 52.5200,           # last map position
+    'map_lon': 13.4050,
+    'map_zoom': 12,
     'cell_aspect': 0.0,           # 0 = auto (h/w ratio of a cell, usually ~2)
     'video_fps': 15,
     'av_offset': 0,               # ms; negative shows the picture earlier than the sound

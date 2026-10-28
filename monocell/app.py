@@ -155,6 +155,7 @@ REGISTRY = [
     ('mail', 'mail', 'Mail', '[M]', 'IMAP/SMTP mail', 'Office'),
     ('viewer', 'viewer', 'Pictures', '[*]', 'Image viewer', 'Media'),
     ('video', 'video', 'Video', '[>]', 'Video player', 'Media'),
+    ('maps', 'maps', 'Maps', '[m]', 'OpenStreetMap in graphics mode', 'Media'),
     ('youtube', 'youtube', 'YouTube', '[Y]', 'Search & play YouTube', 'Media'),
     ('music', 'music', 'Music', '(~)', 'Music player', 'Media'),
     ('snake', 'snake', 'Snake', '[S]', 'Classic snake', 'Games'),

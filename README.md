@@ -13,8 +13,13 @@ Hardware (getestet gegen ein ThinkPad X61s mit 1024×768).
 | ![Image viewer](screenshots/image-viewer.png) | ![PDF reader](screenshots/pdf.png) |
 | ![Matrix rain](screenshots/matrix.png) | ![Paper theme](screenshots/paper.png) |
 
-*Screenshots aus dem Demo-Home, 120–160 Spalten. Die Fensterrahmen skalieren mit dem
-Terminal; alles hier ist echte Ausgabe, keine Mockups.*
+**Grafikmodus** – OpenStreetMap im Framebuffer, dieselben Looks wie der Videoplayer:
+
+![Maps im Grafikmodus](screenshots/maps.png)
+
+*Screenshots aus dem Demo-Home, 120–160 Spalten (die Karte ist ein Abbild des
+Framebuffers). Die Fensterrahmen skalieren mit dem Terminal; alles hier ist echte
+Ausgabe, keine Mockups.*
 
 **Text-Screenshot:** `Alt+S` speichert zwei Dateien in `~/monocell-shots/`:
 `…md` mit dem Bild als reinem Text (lesbar in Kate, GitHub und jedem Editor) und
@@ -196,6 +201,34 @@ monocell-clip --clear
   wird `KD_TEXT` gesetzt. Einstellungen → Images & video, Messwerte im Log
   (`gfx: … frames/s shown`). `python3 -m monocell.fbmode VIDEO OUT.png --look cga`
   rendert ein Standbild durch dieselbe Pipeline.
+* **Maps** – OpenStreetMap im selben Grafikmodus wie der Videoplayer; die App öffnet
+  sich direkt im Framebuffer (auf einem Terminalfenster bleibt das Fenster mit Hinweis).
+  Kartenkacheln werden zu einem Viertelauflösungs-Canvas (X61s: 256×192) zusammengesetzt
+  und durch **dieselbe** Filterkette geschickt (Palette, Bayer-Dither, Scanlines,
+  Nearest-Upscale) – kein zweiter Renderer. Für `VGA 256` gibt es eine eigene
+  Kartensatz-Palette (Papier, Wasser, Wald, Bebauung, Straßenklassen, Beschriftungsgrau),
+  damit große Flächen unter dem Dither ruhig bleiben; `bayer_scale=4` statt 2, weil Fotos
+  mehr Dithering brauchen als flächige Karten.
+
+  | Taste | Wirkung |
+  |---|---|
+  | Pfeile, Ziehen | panen (auch quer über den 180. Längengrad) |
+  | `+`/`-`, Mausrad | zoomen (Z2–Z19, ganzzahlige Kachelstufen) |
+  | `b` oder `/` | Ortssuche; tippen, `Enter` sucht, Pfeile wählen, `Enter` springt hin |
+  | `c` `d` `s` | Look, Dithering, Scanlines (wie im Player) |
+  | `t` | Kachelquelle wechseln (OSM, OSM DE, Carto Light/Dark, OpenTopoMap) |
+  | `r` | Kacheln neu laden · `h` Berlin · `g`/`Esc` zurück |
+
+  Sucht über **Nominatim**, bevorzugt rund um den sichtbaren Ausschnitt (`viewbox`,
+  nicht `bounded`) – „Potsdamer Platz“ findet so Berlin und nicht das gleichnamige
+  Dorfgemüse in Brandenburg. Das Ergebnis zoomt auf die Bounding-Box. Kacheln liegen
+  unter `~/.cache/monocell/maps/<quelle>/z/x/y.png` und sind danach offline nutzbar;
+  es wird nur geladen, was sichtbar ist (Kachel-Policy), Fehlversuche pausieren 30 s.
+  Quelle und Zoomstufe stehen in Einstellungen → Maps (`map_tiles` nimmt auch eine
+  eigene `{z}/{x}/{y}`-URL). Der Standort (Mittelpunkt, Zoom) wird gemerkt.
+  HUD unten: Zoomstufe, Koordinaten, Maßstabsbalken, Attribution; ein Fadenkreuz
+  markiert das Ziel einer Suche. Gemessen auf dem X61s: Canvas 0,3 ms, ein Bild durch
+  die Filterskette 26 ms (VGA) bzw. 24 ms (CGA) → ~30 fps beim Panen.
 * **YouTube** – Suche über `yt-dlp` (auch Video-Links), Ergebnisliste mit Thumbnail,
   Kanal, Dauer und Aufrufen; Wiedergabe lädt max. 480p in den Cache und öffnet den
   Video-Player. Kein Konto, keine API; `yt-dlp` sollte aktuell sein.
@@ -330,8 +363,10 @@ monocell/
   vt.py        VT-Emulator (auch vom Test-Harness benutzt)
   web.py       lite- und CDP-Engine, DOM→Blockmodell
   gcal.py      iCalendar-Abo (Google Calendar) mit RRULE-Expansion und Cache
+  maps.py      OSM-Kacheln, Kachel-Cache, Web-Mercator, Kartensatz-Palette,
+               Ortssuche (Nominatim); ohne Terminal, damit testbar
   apps/        files browser terminal editor writer sheet pdf calc calendar viewer
-               video music system bench settings appearance opencode snake jump …
+               video maps music system bench settings appearance opencode snake jump …
 tools/
   snap.py      Headless-Harness: PTY + VT-Parser + PNG-Renderer, Skripte aus Tasten/Maus
   imgtest.py   Bildpipeline offline testen

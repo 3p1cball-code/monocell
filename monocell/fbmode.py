@@ -356,22 +356,27 @@ def scanline_file(w, h, scale):
 
 def build(video, screen, line_px, pix_fmt, look='vga', scale=SCALE, dither='bayer',
           scanlines=False, fps=25, palette=None, mask=None, colours=None, pattern=None,
-          down='area'):
-    """(extra inputs, filter graph) for one look. `video`: probe info of the stream."""
+          down='area', bayer_scale=None):
+    """(extra inputs, filter graph) for one look. `video`: probe info of the stream.
+
+    `fps=None` keeps the input rate untouched (still images, where the source is
+    already exactly one frame per picture)."""
     cw, ch = canvas(screen, scale)
     fw, fh = fit(video.get('w', 16), video.get('h', 9), video.get('sar', 1.0), cw, ch)
     W, H = screen
     uw, uh = cw * scale, ch * scale
     x0, y0 = (W - uw) // 2, (H - uh) // 2
-    d = 'bayer:bayer_scale=%d' % BAYER_SCALE.get(look, 2) if dither == 'bayer' else 'none'
+    bs = bayer_scale or BAYER_SCALE.get(look, 2)
+    d = 'bayer:bayer_scale=%d' % bs if dither == 'bayer' else 'none'
     luma = look in LUMA_LOOKS
+    pre = '' if fps is None else 'fps=%d,' % fps
     inputs = []
     if luma:
         # ordered dither by hand: add a Bayer threshold, round down to the grey levels
         n = len(colours)
         step = 255 // (n - 1)
-        g = ['[0:v]fps=%d,scale=%d:%d:flags=%s,setsar=1,format=gray,%s,'
-             'pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black[g]' % (fps, fw, fh, down, TONE[look], cw, ch)]
+        g = ['[0:v]%sscale=%d:%d:flags=%s,setsar=1,format=gray,%s,'
+             'pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black[g]' % (pre, fw, fh, down, TONE[look], cw, ch)]
         if dither == 'bayer':
             inputs.append(pattern)
             g.append('[g][1:v]blend=all_mode=addition[gd]')
@@ -381,7 +386,7 @@ def build(video, screen, line_px, pix_fmt, look='vga', scale=SCALE, dither='baye
         g.append("[%s]lut=c0='min(floor((val+%d)/%d),%d)*%d',format=rgb24,%s[q]"
                  % (src, bias, step, n - 1, step, colourize(colours)))
     else:
-        g = ['[0:v]fps=%d,scale=%d:%d:flags=%s,setsar=1,format=rgb24[s]' % (fps, fw, fh, down)]
+        g = ['[0:v]%sscale=%d:%d:flags=%s,setsar=1,format=rgb24[s]' % (pre, fw, fh, down)]
         inputs.append(palette)
         g.append('[s][1:v]paletteuse=dither=%s[q]' % d)
     g.append('[q]format=rgb24,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,'
@@ -430,6 +435,128 @@ def command(path, offset, video, screen, line_px, pix_fmt, theme_rgb=None, accen
     return cmd, cv
 
 
+def image_command(size, screen, line_px, pix_fmt, theme_rgb=None, accent=None, look='vga',
+                  scale=SCALE, dither='bayer', scanlines=False, vga_palette=None,
+                  down='area', bayer_scale=None, out='raw'):
+    """The same look for still pictures (the map app): the input comes on stdin as one
+    raw rgb24 frame of `size` canvas pixels, each frame in gives one framebuffer frame.
+
+    Everything after the source is shared with `command()`: identical palettes, Bayer
+    pattern, scanline mask, nearest-neighbour upscale. `out='ppm'` is for the long
+    running StillPipeline: the rawvideo muxer buffers a frame until the next one
+    arrives, the image2pipe muxer flushes every picture."""
+    colours = palette_colours(look, theme_rgb, accent)
+    pal = pattern = mask = None
+    if look in LUMA_LOOKS:
+        cw, ch = canvas(screen, scale)
+        pattern = bayer_file(cw, ch, 255 // (len(colours) - 1))
+    elif look == 'vga' and vga_palette:
+        pal = vga_palette
+    else:
+        pal = palette_file(colours)
+    if scanlines:
+        cw, ch = canvas(screen, scale)
+        mask = scanline_file(cw * scale, ch * scale, scale)
+    video = {'w': size[0], 'h': size[1], 'sar': 1.0}
+    inputs, graph, cv = build(video, screen, line_px, pix_fmt, look, scale, dither,
+                              scanlines, None, pal, mask, colours, pattern, down,
+                              bayer_scale)
+    cmd = ['ffmpeg', '-v', 'error', '-nostdin',
+           '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '%dx%d' % (size[0], size[1]),
+           '-i', '-']
+    for p in inputs:
+        cmd += ['-i', p]
+    cmd += ['-an', '-sn', '-filter_complex', graph, '-map', '[out]']
+    if out == 'ppm':
+        cmd += ['-f', 'image2pipe', '-c:v', 'ppm', '-']
+    else:
+        cmd += ['-f', 'rawvideo', '-pix_fmt', pix_fmt, '-']
+    return cmd, cv
+
+
+def image_frame(raw, size, screen, line_px, pix_fmt, **kw):
+    """One still through the graphics pipeline: (framebuffer bytes, canvas size)."""
+    cmd, cv = image_command(size, screen, line_px, pix_fmt, **kw)
+    out = subprocess.run(cmd, input=raw, capture_output=True)
+    return out.stdout, cv
+
+
+class StillPipeline:
+    """A long running filter chain for still pictures: canvas frames in, framebuffer
+    frames out - the video player's looks, for something that is redrawn by hand.
+
+    A new ffmpeg per picture costs ~190 ms just to start up, so the process stays
+    alive. Its output must not be rawvideo: that muxer holds a picture back until the
+    next one arrives (one frame in, nothing out). The image2pipe muxer flushes every
+    PPM, so the picture comes back as P6 and the framebuffer's pixel format is made
+    here (PIL, in C) - about 3 ms for 1024x768.
+    """
+
+    PPM_TARGET = {32: 'BGRX', 24: 'BGR', 16: 'BGR;16'}
+
+    def __init__(self, size, fb, **kw):
+        self.fb = fb
+        self.size = (int(size[0]), int(size[1]))
+        if fb.bpp not in self.PPM_TARGET:
+            raise OSError('unsupported framebuffer depth: %d bit' % fb.bpp)
+        self.target = self.PPM_TARGET[fb.bpp]
+        cmd, self.canvas = image_command(self.size, (fb.w, fb.h), fb.w, 'rgb24',
+                                         out='ppm', **kw)
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.DEVNULL, bufsize=0)
+        for f in (self.proc.stdin, self.proc.stdout):
+            try:                                  # 64 kB means many tiny reads
+                fcntl.fcntl(f.fileno(), 1031, 1 << 20)          # F_SETPIPE_SZ
+            except OSError:
+                pass
+
+    def _read(self, n):
+        out = bytearray(n)
+        got = 0
+        while got < n:
+            k = self.proc.stdout.readinto(memoryview(out)[got:])
+            if not k:
+                raise OSError('graphics pipeline stopped')
+            got += k
+        return out
+
+    def frame(self, rgb):
+        """One canvas frame (rgb24, size) -> bytes for the framebuffer."""
+        try:
+            self.proc.stdin.write(rgb)
+            self.proc.stdin.flush()
+        except (BrokenPipeError, OSError) as e:
+            raise OSError('graphics pipeline: %s' % e)
+        hdr = b''
+        while hdr.count(b'\n') < 3:               # 'P6\nW H\n255\n'
+            c = self.proc.stdout.read(1)
+            if not c:
+                raise OSError('graphics pipeline stopped')
+            hdr += c
+        if not hdr.startswith(b'P6'):
+            raise OSError('graphics pipeline: unexpected output')
+        w, h = (int(v) for v in hdr.split(b'\n')[1].split())
+        data = bytes(self._read(w * h * 3))
+        from PIL import Image
+        img = Image.frombytes('RGB', (w, h), data)
+        if self.fb.w > w:                         # line padding
+            wide = Image.new('RGB', (self.fb.line_px, h), (0, 0, 0))
+            wide.paste(img, (0, 0))
+            img = wide
+        return img.tobytes('raw', self.target)
+
+    def close(self):
+        p, self.proc = self.proc, None
+        if not p:
+            return
+        for step in (lambda: p.stdin.close(), lambda: p.kill(), lambda: p.wait(timeout=1),
+                     lambda: p.stdout.close()):
+            try:
+                step()
+            except Exception:
+                pass
+
+
 # ------------------------------------------------------------------ 3x5 pixel font
 FONT = {
     '0': ['###', '# #', '# #', '# #', '###'], '1': [' # ', '## ', ' # ', ' # ', '###'],
@@ -453,7 +580,8 @@ FONT = {
     ':': ['   ', ' # ', '   ', ' # ', '   '], '/': ['  #', '  #', ' # ', '#  ', '#  '],
     '.': ['   ', '   ', '   ', '   ', ' # '], '-': ['   ', '   ', '###', '   ', '   '],
     '+': ['   ', ' # ', '###', ' # ', '   '], '%': ['# #', '  #', ' # ', '#  ', '# #'],
-    '=': ['   ', '###', '   ', '###', '   '], ' ': ['   '] * 5,
+    '=': ['   ', '###', '   ', '###', '   '], '_': ['   ', '   ', '   ', '   ', '###'],
+    ' ': ['   '] * 5,
     '(': [' # ', '#  ', '#  ', '#  ', ' # '], ')': [' # ', '  #', '  #', '  #', ' # '],
     ',': ['   ', '   ', '   ', ' # ', '#  '],
 }

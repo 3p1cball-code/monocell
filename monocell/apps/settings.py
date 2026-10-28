@@ -7,7 +7,8 @@ from ..widgets import MenuItem, TextField, button
 from .appearance import AppearanceMixin
 
 SECTIONS = [('colors', 'Appearance'), ('desktop', 'Desktop'), ('background', 'Background'),
-            ('media', 'Images & video'), ('web', 'Web'), ('calendar', 'Calendar'), ('tools', 'Tools'),
+            ('media', 'Images & video'), ('maps', 'Maps'), ('web', 'Web'),
+            ('calendar', 'Calendar'), ('tools', 'Tools'),
             ('about', 'About')]
 
 OPTIONS = {
@@ -45,6 +46,10 @@ OPTIONS = {
         ('gfx_dither', 'Graphics dithering', ['bayer', 'none']),
         ('gfx_scanlines', 'Graphics scanlines', [False, True]),
         ('gfx_fps', 'Graphics frame rate (0 = auto)', [0, 12, 15, 20, 25, 30]),
+    ],
+    'maps': [
+        ('map_tiles', 'Tile source (preset or {z}/{x}/{y} URL)', 'text'),
+        ('map_zoom', 'Zoom (2-19)', list(range(2, 20))),
     ],
     'web': [
         ('web_engine', 'Engine', ['auto', 'lite', 'chromium']),
