@@ -119,6 +119,23 @@ RULE
     echo "power: reboot/shutdown allowed for $USER_NAME (polkit rule installed)"
 fi
 
+# ---------------------------------------------------------------- removable media
+if printf '%s' "$USER_NAME" | grep -q '^[A-Za-z0-9_-][A-Za-z0-9_.-]*$'; then
+    cat > /etc/polkit-1/rules.d/50-monocell-media.rules <<RULE
+// monocell mounts removable media (USB, SD, CF/Microdrive): on the VT there is
+// no polkit authentication agent, so the console user is allowed directly.
+polkit.addRule(function(action, subject) {
+    if (subject.user == "$USER_NAME" &&
+        ["org.freedesktop.udisks2.filesystem-mount",
+         "org.freedesktop.udisks2.eject-media"].indexOf(action.id) >= 0) {
+        return polkit.Result.YES;
+    }
+});
+RULE
+    chmod 644 /etc/polkit-1/rules.d/50-monocell-media.rules
+    echo "media: mounting removable drives allowed for $USER_NAME (udisks2 + polkit rule)"
+fi
+
 # ---------------------------------------------------------------- console mouse
 systemctl disable --now gpm.service >/dev/null 2>&1 || true
 

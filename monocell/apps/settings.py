@@ -19,6 +19,7 @@ OPTIONS = {
         ('clock_24h', '24 hour clock', [False, True]),
         ('clock_seconds', 'Clock shows seconds', [False, True]),
         ('desktop_logo', 'Desktop logo', [False, True]),
+        ('media_prompt', 'Ask to mount removable media', [True, False]),
         ('wallpaper', 'Wallpaper image', 'file'),
         ('symbols', 'Symbols (single-width unicode)', ['auto', 'on', 'off']),
         ('strict_ascii', 'Strict ASCII (transliterate umlauts etc.)', [False, True]),

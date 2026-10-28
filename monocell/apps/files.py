@@ -7,9 +7,10 @@ import subprocess
 import time
 import urllib.parse
 
+from .. import media, transfer
 from ..app import App
 from ..util import HOME, fit, human_size, shorten_path, wrap_text
-from ..widgets import ListView, MenuItem, TextField, button
+from ..widgets import ListView, MenuItem, TextField, button, hbar
 
 AUDIO = ('.mp3', '.flac', '.ogg', '.oga', '.opus', '.wav', '.m4a', '.aac', '.wma', '.aiff', '.mka')
 VIDEO = ('.mp4', '.mkv', '.webm', '.avi', '.mov', '.m4v', '.wmv', '.flv', '.mpg', '.mpeg', '.ts', '.ogv', '.3gp')
@@ -225,6 +226,9 @@ class FileList:
                 if e.name == select:
                     self.list.sel = i
                     self.list.ensure()
+        remember = getattr(self.app, 'remember_dir', None)
+        if remember:
+            remember(self.path)
         return True
 
     def up(self):
@@ -328,23 +332,55 @@ class Files(App):
 
     def __init__(self, wm, win, path=None, **kw):
         super().__init__(wm, win)
-        start = path or HOME
+        start = path or wm.cfg.get('files_dir') or HOME
+        if not (os.path.isdir(start) or os.path.isfile(start)):
+            start = HOME                       # the remembered folder is gone
         sel = None
         if os.path.isfile(start):
             start, sel = os.path.split(start)
         self.fl = FileList(self, start)
+        self.rem_timer = None
+        self.rem_dir = None
+        self.remember_dir(self.fl.path)
         if sel:
             self.fl.chdir(start, sel)
         self.fl.list.on_activate = self.activate
+        self.drives = []
+        self.drives_key = None
+        self.transfer = None
+        self.refresh_drives()
         self.back_stack = []
         self.fwd_stack = []
         self.pathfield = None
-        self.places = places()
+        # mounted media live in DRIVES (mount/unmount), not twice in PLACES
+        self.places = [(n, p) for n, p in places()
+                       if not any(v['mount'] and media.inside(p, v['mount'])
+                                  for v in self.drives)]
         self.preview_key = None
         self.preview = None
         self.update_title()
         self.every(3.0, self.poll)
+        self.every(0.1, self.transfer_tick)
         self.mtime = self.dir_mtime()
+
+    def remember_dir(self, path):
+        """Keep the folder for the next start (debounced: arrow keys through the tree)."""
+        self.rem_dir = os.path.abspath(path)
+        if self.wm.cfg.get('files_dir') == self.rem_dir:
+            return
+        if self.rem_timer:
+            self.rem_timer.cancel()
+        self.rem_timer = self.later(0.5, self.save_dir)
+
+    def save_dir(self):
+        self.rem_timer = None
+        if self.rem_dir and self.wm.cfg.get('files_dir') != self.rem_dir:
+            self.wm.cfg['files_dir'] = self.rem_dir
+            self.wm.cfg.save()
+
+    def on_close(self):
+        self.save_dir()
+        return True
 
     def dir_mtime(self):
         try:
@@ -353,12 +389,72 @@ class Files(App):
             return 0
 
     def poll(self):
+        self.refresh_drives()
         m = self.dir_mtime()
         if m != self.mtime:
             self.mtime = m
             c = self.fl.current()
             self.fl.refresh(keep=c.name if c else None)
             self.invalidate()
+
+    # ------------------------------------------------------------ drives
+    def refresh_drives(self):
+        vols = media.snapshot(5.0)
+        key = tuple((v['device'], v['mount']) for v in vols)
+        if key != self.drives_key:
+            self.drives_key = key
+            self.drives = vols
+            self.invalidate()
+
+    def open_drive(self, i):
+        if not 0 <= i < len(self.drives):
+            return
+        v = self.drives[i]
+        if v['mount']:
+            self.go(v['mount'])
+        else:
+            self.mount_drive(v)
+
+    def mount_drive(self, v):
+        self.wm.toast('Mounting %s...' % v['name'], 'accent', 3)
+
+        def done(res):
+            path, err = res
+            self.refresh_drives()
+            if path:
+                self.go(path)
+                self.wm.toast('Mounted %s at %s' % (v['name'], path), 'accent', 5)
+            else:
+                media.invalidate()
+                self.wm.toast('Mount %s: %s' % (v['name'], err or 'failed'), 'red', 8)
+
+        self.thread(lambda: media.mount(v['device']), done)
+
+    def unmount_drive(self, v):
+        def done(res):
+            ok, err = res
+            self.refresh_drives()
+            if ok:
+                if media.inside(self.fl.path, v['mount']):
+                    self.go(HOME)
+                self.wm.toast('Unmounted %s - safe to remove' % v['name'], 'accent', 5)
+            else:
+                self.wm.toast('Unmount %s: %s' % (v['name'], err or 'busy'), 'red', 8)
+
+        self.thread(lambda: media.unmount(v['device']), done)
+
+    def drive_menu(self, i, ev):
+        if not 0 <= i < len(self.drives):
+            return
+        v = self.drives[i]
+        items = []
+        if v['mount']:
+            items.append(MenuItem('Open', lambda: self.go(v['mount'])))
+            items.append(MenuItem('Unmount', lambda: self.unmount_drive(v)))
+        else:
+            items.append(MenuItem('Mount', lambda: self.mount_drive(v)))
+        self.wm.menu(items, self.win.x + 1 + ev.x, self.win.y + 1 + ev.y)
+        self.invalidate()
 
     def update_title(self):
         self.set_title(os.path.basename(self.fl.path.rstrip('/')) or '/')
@@ -415,10 +511,32 @@ class Files(App):
                 cv.fill(0, yy, side - 1, 1, a)
                 cv.put(1, yy, fit(name, side - 2), a)
                 self.zone(0, yy, side - 1, 1, ('place', i))
+            row = 3 + len(self.places)
+            if self.drives and row + 1 < h - 1:
+                row += 1
+                cv.put(1, row, 'DRIVES', th.c('dim', 'win'))
+                row += 1
+                for i, v in enumerate(self.drives):
+                    if row >= h - 1:
+                        break
+                    here = v['mount'] and media.inside(self.fl.path, v['mount'])
+                    if here:
+                        a = th.c('accent', 'raised')
+                    elif self.hover == ('drive', i):
+                        a = th.c('bright', 'sel')
+                    else:
+                        a = th.c('text' if v['mount'] else 'dim', 'win')
+                    cv.fill(0, row, side - 1, 1, a)
+                    cv.put(1, row, fit(v['name'], side - 2), a)
+                    self.zone(0, row, side - 1, 1, ('drive', i))
+                    row += 1
         self.fl.draw(cv, side, 2, listw, h - 3, focused)
         if prev:
             self.draw_preview(cv, side + listw + 1, 2, 35, h - 3)
         # status bar
+        if self.transfer and self.transfer.active:
+            self.draw_transfer(cv, w, h - 1)
+            return
         n = len(self.fl.entries)
         sel = len(self.fl.marked)
         try:
@@ -429,6 +547,32 @@ class Files(App):
         s = '%d items%s' % (n, ', %d marked' % sel if sel else '')
         cv.put(0, h - 1, s, th.c('dim', 'win'))
         cv.put(w - len(free), h - 1, free, th.c('dim', 'win'))
+
+    def draw_transfer(self, cv, w, y):
+        """Status line while a copy runs: counts, bar, current name and a Stop button."""
+        th = self.th
+        t = self.transfer
+        cv.fill(0, y, w, 1, th.c('text', 'win'))
+        stop = 6                                      # ' Stop '
+        verb = 'Moving' if t.move else 'Copying'
+        if t.state == 'planning':
+            cv.put(0, y, fit('%s - preparing...' % verb, w - stop), th.c('text', 'win'))
+            button(self, cv, w - stop, y, 'Stop', 'stop')
+            return
+        pct = int(t.fraction * 100 + 0.5)
+        left = '%s %d/%d' % (verb, t.files_done, t.files_total)
+        size = '%s/%s' % (human_size(t.done), human_size(t.total))
+        right = '%d%%  %s' % (pct, size)
+        middle = w - len(left) - len(right) - stop - 3
+        cv.put(0, y, left, th.c('text', 'win'))
+        if middle >= 8:
+            hbar(cv, len(left) + 1, y, middle, t.fraction, th, bg='win')
+        if middle >= 8:
+            cv.put(w - stop - len(right) - 1, y, right, th.c('dim', 'win'))
+        else:
+            cv.put(len(left) + 1, y, fit('%d%%' % pct, w - len(left) - stop - 1),
+                   th.c('dim', 'win'))
+        button(self, cv, w - stop, y, 'Stop', 'stop')
 
     def draw_preview(self, cv, x, y, w, h):
         th = self.th
@@ -532,39 +676,49 @@ class Files(App):
         clip = getattr(self.wm, 'file_clip', None)
         if not clip:
             return
+        if self.transfer and self.transfer.active:
+            self.wm.toast('A transfer is still running', 'red')
+            return
         mode, paths = clip
-        dest = self.fl.path
+        t = transfer.Transfer(paths, self.fl.path, move=(mode == 'cut'))
+        self.transfer = t
+        self.invalidate()
 
         def work():
-            done = 0
-            for p in paths:
-                name = os.path.basename(p.rstrip('/'))
-                target = os.path.join(dest, name)
-                if os.path.abspath(p) == os.path.abspath(target):
-                    base, ext = os.path.splitext(name)
-                    target = os.path.join(dest, '%s copy%s' % (base, ext))
-                    n = 2
-                    while os.path.exists(target):
-                        target = os.path.join(dest, '%s copy %d%s' % (base, n, ext))
-                        n += 1
-                if mode == 'copy':
-                    if os.path.isdir(p):
-                        shutil.copytree(p, target, symlinks=True)
-                    else:
-                        shutil.copy2(p, target)
-                else:
-                    shutil.move(p, target)
-                done += 1
-            return done
+            t.plan()
+            problem = t.space_problem()
+            if problem:                        # do not waste minutes on a full card
+                t.error = 'not enough space: %s' % problem
+                t.state = 'error'
+                return
+            t.run()
 
-        def ok(n):
-            self.wm.toast('%s %d item(s)' % ('Copied' if mode == 'copy' else 'Moved', n), 'green')
+        def done(_):
+            self.transfer_done(t, mode)
+        self.thread(work, done)
+
+    def cancel_transfer(self):
+        if self.transfer and self.transfer.active:
+            self.transfer.cancel()
+            self.wm.toast('Stopping...', 'accent', 2)
+
+    def transfer_tick(self):
+        if self.transfer and self.transfer.active:
+            self.invalidate()
+
+    def transfer_done(self, t, mode):
+        if t.state == 'error':
+            self.wm.toast('Paste failed: %s' % t.error, 'red', 8)
+        elif t.state == 'cancelled':
+            self.wm.toast('Cancelled - %s' % t.summary(), 'accent', 6)
+        else:
+            verb = 'Moved' if mode == 'cut' else 'Copied'
+            extra = '' if not t.skipped else ' (%d skipped)' % t.skipped
+            self.wm.toast('%s %s%s' % (verb, t.summary(), extra), 'green', 6)
             if mode == 'cut':
                 self.wm.file_clip = None
-            self.fl.refresh()
-            self.invalidate()
-        self.wm.toast('Working in background...')
-        self.thread(work, ok)
+        self.fl.refresh()
+        self.invalidate()
 
     def rename(self):
         e = self.fl.current()
@@ -665,6 +819,10 @@ class Files(App):
             self.wm.menu(self.menu_items(self.fl.current()), mx - 20, my + 1)
         elif key[0] == 'place':
             self.go(self.places[key[1]][1])
+        elif key[0] == 'drive':
+            self.open_drive(key[1])
+        elif key == 'stop':
+            self.cancel_transfer()
         elif key[0] == 'sort':
             self.fl.sort = key[1]
             self.fl.refresh()
@@ -687,6 +845,10 @@ class Files(App):
         if ev.kind == 'down' and self.zone_at(ev.x, ev.y) != 'path':
             self.pathfield = None
         k = self.zone_at(ev.x, ev.y)
+        if (isinstance(k, tuple) and k[0] == 'drive' and ev.kind == 'down'
+                and ev.button == 2):
+            self.drive_menu(k[1], ev)
+            return True
         if k == 'list' or (ev.kind in ('wheelup', 'wheeldown') and k is not None and k != 'path'):
             side = 16 if self.cw >= 70 else 0
             ry = ev.y - 3

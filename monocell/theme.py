@@ -192,7 +192,9 @@ DEFAULT_CONFIG = {
     'clock_seconds': False,
     'clock_24h': True,
     'desktop_logo': False,
+    'media_prompt': True,         # ask before mounting a newly plugged-in medium
     'wallpaper': '',
+    'files_dir': '',              # Files: the folder it was last in
     'background': 'auto',         # auto | logo | plain | image | matrix
     'rain_density': 1.0,
     'rain_speed': 1.0,

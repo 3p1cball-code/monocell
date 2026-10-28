@@ -10,10 +10,11 @@ import traceback
 from . import clipboard as clip
 from . import clock
 from . import hardware
+from . import media
 from .app import REGISTRY, load_app
 from .screen import Canvas
 from .term import Key, Mouse, Paste
-from .util import fit, log, sym
+from .util import fit, human_size, log, sym
 from .widgets import Dialog, Menu, MenuItem, TextField, scrollbar
 
 DOUBLE_CLICK = 0.4
@@ -539,6 +540,73 @@ class WM:
         self.sync_symbols()
         self.load_wallpaper()
         loop.every(0.09, self.rain_tick)
+        self.media_volumes = []
+        self.media_busy = False
+        self.media_seen = set()            # devices in the previous scan
+        self.media_new = set()             # freshly seen, still unmounted, not asked yet
+        loop.every(4.0, self.poll_media)
+        loop.call_later(1.5, self.poll_media)   # a medium that is already plugged in
+
+    # ---------------------------------------------------------- removable media
+    def poll_media(self):
+        """Look for removable volumes off the UI thread (lsblk costs ~20 ms)."""
+        if self.media_busy or self.gfx:
+            return                          # nothing invisible behind a fullscreen app
+        self.media_busy = True
+
+        def done(vols):
+            self.media_busy = False
+            self.media_volumes = vols
+            self.offer_media(vols)
+
+        def failed(e):
+            self.media_busy = False
+            log('media: %s' % e)
+
+        self.loop.run_in_thread(media.volumes, done, failed)
+
+    def offer_media(self, vols):
+        """Ask once per medium that newly shows up and is not mounted.
+
+        A volume that was already there when we looked (or that is mounted) is not
+        offered again after an unmount - only a medium that goes away and comes back
+        is new. The prompt waits while a dialog is open and one is asked at a time.
+        """
+        by_dev = {v['device']: v for v in vols}
+        for dev, v in by_dev.items():
+            if dev not in self.media_seen and not v['mount']:
+                self.media_new.add(dev)
+        self.media_seen = set(by_dev)
+        self.media_new = {d for d in self.media_new
+                          if d in by_dev and not by_dev[d]['mount']}
+        if not self.media_new or not self.cfg.get('media_prompt', True):
+            return
+        if any(w.modal_for for w in self.windows):
+            return                          # ask again next round, not on top of a dialog
+        dev = sorted(self.media_new)[0]
+        self.media_new.discard(dev)
+        v = by_dev[dev]
+        text = '%s\n%s%s  %s\nMount it now?' % (
+            v['name'][:40], (v['size_text'] + '  ') if v['size_text'] else '',
+            v['fstype'], v['device'])
+        self.confirm('Removable medium', text,
+                     lambda v=v: self.mount_media(v), yes='Mount', no='Not now')
+
+    def mount_media(self, v):
+        self.toast('Mounting %s...' % v['name'], 'accent', 3)
+
+        def work():
+            return media.mount(v['device'])
+
+        def done(res):
+            path, err = res
+            if path:
+                self.toast('Mounted %s at %s' % (v['name'], path), 'accent', 6)
+            else:
+                self.toast('Mount %s: %s' % (v['name'], err or 'failed'), 'red', 8)
+                media.invalidate()
+
+        self.loop.run_in_thread(work, done, lambda e: self.toast('Mount: %s' % e, 'red', 6))
 
     # ---------------------------------------------------------- geometry
     def layout(self):
@@ -938,13 +1006,53 @@ class WM:
     def on_error(self, e, tb=''):
         self.toast('Error: %s' % e, 'red', 6)
 
+    def busy_transfers(self):
+        """Running copies/moves (the file manager's Transfer), for the exit warning."""
+        out = []
+        for win in self.windows:
+            t = getattr(win.app, 'transfer', None) if win.app is not None else None
+            if t is not None and getattr(t, 'active', False):
+                out.append(t)
+        return out
+
+    def cancel_transfers(self):
+        for t in self.busy_transfers():
+            t.cancel()
+
+    def busy_note(self, t):
+        return ('A copy is still running: %d%% of %s (%s of %s).\n'
+                'Stop it and continue? A half-written file is removed.' % (
+                    int(t.fraction * 100), human_size(t.total),
+                    human_size(t.done), human_size(t.total)))
+
     def confirm_exit(self):
+        busy = self.busy_transfers()
+        if busy:
+            self.confirm('Copy still running', self.busy_note(busy[0]),
+                         self._stop_and(self.quit), yes='Stop and exit')
+            return
         self.confirm('Exit monocell', 'Close all windows and leave monocell?', self.quit, yes='Exit')
 
+    def _stop_and(self, action):
+        def run():
+            self.cancel_transfers()
+            action()
+        return run
+
     def confirm_reboot(self):
+        busy = self.busy_transfers()
+        if busy:
+            self.confirm('Copy still running', self.busy_note(busy[0]),
+                         self._stop_and(lambda: self.power('reboot')), yes='Stop and reboot')
+            return
         self.confirm('Reboot', 'Reboot the computer now?', lambda: self.power('reboot'), yes='Reboot')
 
     def confirm_shutdown(self):
+        busy = self.busy_transfers()
+        if busy:
+            self.confirm('Copy still running', self.busy_note(busy[0]),
+                         self._stop_and(lambda: self.power('poweroff')), yes='Stop and shut down')
+            return
         self.confirm('Shut down', 'Shut down the computer now?', lambda: self.power('poweroff'),
                      yes='Shut down')
 
@@ -959,6 +1067,7 @@ class WM:
             self.toast('%s: %s' % (action, msg[0][:120]), 'red')
 
     def quit(self):
+        self.cancel_transfers()
         for win in list(self.windows):
             self.close(win, force=True)
         self.loop.running = False
