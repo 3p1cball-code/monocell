@@ -11,8 +11,7 @@ import urllib.parse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from monocell import fbmode, maps  # noqa: E402
-from monocell.apps.maps import ascii_upper  # noqa: E402
-from monocell.util import which  # noqa: E402
+from monocell.util import ascii_upper, which  # noqa: E402
 
 from PIL import Image  # noqa: E402
 

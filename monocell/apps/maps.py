@@ -11,25 +11,14 @@ Keys in graphics mode:  arrows pan, + / - zoom, wheel zooms, drag pans,
     S scanlines, T tile source, R refetch, G / Esc back to the window.
 """
 import time
-import unicodedata
 
 from .. import fbmode, maps
 from ..app import App
-from ..util import fit, log
+from ..util import ascii_upper, fit, log
 from ..widgets import button
 
 PAN_PIXELS = 32          # canvas pixels per arrow press
 MAP_BAYER = 4            # 0..5: 4 keeps flat map areas clean (2 is the player's, for photos)
-
-
-def ascii_upper(s):
-    """Uppercase ASCII the 3x5 font can draw (umlauts spelled out)."""
-    for a, b in (('ä', 'AE'), ('ö', 'OE'), ('ü', 'UE'), ('ß', 'SS'),
-                 ('Ä', 'AE'), ('Ö', 'OE'), ('Ü', 'UE')):
-        s = s.replace(a, b)
-    s = unicodedata.normalize('NFKD', s)
-    s = ''.join(c for c in s if not unicodedata.combining(c))
-    return ''.join(c if 32 <= ord(c) < 127 else '?' for c in s).upper()
 
 
 class Maps(App):

@@ -281,6 +281,32 @@ def make_video_palette(path, timeout=180, sample=90.0):
         return None
 
 
+def palette_from_frame(rgb, size, out, timeout=60):
+    """A 256-colour palette from one raw rgb24 frame, cached at `out` (still pictures).
+
+    The picture viewer has the decoded image already; making the palette from that
+    frame is a fraction of a second, while reading a 10 MB JPEG over a share again
+    just for the palette would not be. Returns the path or None."""
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    tmp = out[:-4] + '.tmp.png'
+    cmd = ['nice', '-n', '15', 'ffmpeg', '-v', 'error', '-nostdin', '-y',
+           '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '%dx%d' % (size[0], size[1]),
+           '-i', '-',
+           '-vf', 'palettegen=max_colors=256:stats_mode=full:reserve_transparent=0',
+           '-frames:v', '1', '-update', '1', tmp]
+    try:
+        subprocess.run(cmd, input=rgb, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=timeout, check=True)
+        os.replace(tmp, out)
+        return out
+    except (OSError, subprocess.SubprocessError):
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return None
+
+
 def palette_colours(look, theme_rgb=None, accent=None):
     if look == 'vga':
         return uniform_256()

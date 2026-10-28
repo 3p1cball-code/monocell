@@ -113,6 +113,16 @@ _BOX = set('─━┄┅┈┉╌╍═╼╾⎯│┃┆┇┊┋╎╏║╽�
            '█▉▊▋▓▒▌▐▍▎▏▀▄▆▅▇▃▂▁░')
 
 
+def ascii_upper(s):
+    """Uppercase ASCII for the graphics-mode pixel font (umlauts spelled out)."""
+    for a, b in (('ä', 'AE'), ('ö', 'OE'), ('ü', 'UE'), ('ß', 'SS'),
+                 ('Ä', 'AE'), ('Ö', 'OE'), ('Ü', 'UE')):
+        s = s.replace(a, b)
+    s = unicodedata.normalize('NFKD', s)
+    s = ''.join(c for c in s if not unicodedata.combining(c))
+    return ''.join(c if 32 <= ord(c) < 127 else '?' for c in s).upper()
+
+
 def clean(s):
     """Return a string that occupies exactly one cell per character.
 
