@@ -190,6 +190,7 @@ class FileList:
         self.typed = ''
         self.typed_t = 0
         self.filter = None
+        self.reloading = False
         self.refresh()
 
     def refresh(self, keep=None):
@@ -197,11 +198,13 @@ class FileList:
             ents = list_dir(self.path, self.hidden, self.sort)
             if self.filter:
                 ents = [e for e in ents if self.filter(e)]
-            self.entries = ents
-            self.error = ''
+            self._apply(ents, keep)
         except OSError as e:
-            self.entries = []
-            self.error = e.strerror or str(e)
+            self._apply([], keep, e.strerror or str(e))
+
+    def _apply(self, ents, keep=None, error=''):
+        self.entries = ents
+        self.error = error
         self.marked &= {e.path for e in self.entries}
         self.list.set_items(self.entries, keep=keep is not None)
         if keep:
@@ -210,6 +213,33 @@ class FileList:
                     self.list.sel = i
                     self.list.ensure()
                     break
+
+    def refresh_async(self, keep=None):
+        """Re-list on a worker so a slow share cannot stall drawing."""
+        if self.reloading:
+            return
+        path, hidden, sort, filt = self.path, self.hidden, self.sort, self.filter
+        self.reloading = True
+
+        def work():
+            return list_dir(path, hidden, sort)
+
+        def done(ents):
+            self.reloading = False
+            if (path, hidden, sort) != (self.path, self.hidden, self.sort):
+                return
+            if filt:
+                ents = [e for e in ents if filt(e)]
+            self._apply(ents, keep)
+            self.app.invalidate()
+
+        def fail(err):
+            self.reloading = False
+            if path == self.path:
+                self._apply([], keep, getattr(err, 'strerror', None) or str(err))
+                self.app.invalidate()
+
+        self.app.thread(work, done, fail)
 
     def chdir(self, path, select=None):
         path = os.path.abspath(os.path.expanduser(path))
@@ -358,6 +388,11 @@ class Files(App):
                                   for v in self.drives)]
         self.preview_key = None
         self.preview = None
+        self.free_txt = ''
+        self.free_path = None
+        self.free_at = 0.0
+        self.free_busy = False
+        self.mtime_busy = False
         self.update_title()
         self.every(3.0, self.poll)
         self.every(0.1, self.transfer_tick)
@@ -390,12 +425,31 @@ class Files(App):
 
     def poll(self):
         self.refresh_drives()
-        m = self.dir_mtime()
-        if m != self.mtime:
-            self.mtime = m
-            c = self.fl.current()
-            self.fl.refresh(keep=c.name if c else None)
-            self.invalidate()
+        if self.mtime_busy:
+            return
+        self.mtime_busy = True
+        path = self.fl.path
+
+        def work():
+            try:
+                return os.stat(path).st_mtime
+            except OSError:
+                return 0
+
+        def done(m):
+            self.mtime_busy = False
+            if path != self.fl.path:
+                return
+            if m != self.mtime:
+                self.mtime = m
+                c = self.fl.current()
+                self.fl.refresh_async(keep=c.name if c else None)
+                self.invalidate()
+
+        def fail(err):
+            self.mtime_busy = False
+
+        self.thread(work, done, fail)
 
     # ------------------------------------------------------------ drives
     def refresh_drives(self):
@@ -539,14 +593,43 @@ class Files(App):
             return
         n = len(self.fl.entries)
         sel = len(self.fl.marked)
-        try:
-            st = os.statvfs(self.fl.path)
-            free = human_size(st.f_bavail * st.f_frsize) + ' free'
-        except OSError:
-            free = ''
+        free = self.free_text()
         s = '%d items%s' % (n, ', %d marked' % sel if sel else '')
         cv.put(0, h - 1, s, th.c('dim', 'win'))
         cv.put(w - len(free), h - 1, free, th.c('dim', 'win'))
+
+    def free_text(self):
+        """'4.2G free' for the status bar, without blocking the UI thread."""
+        now = time.monotonic()
+        if self.free_path != self.fl.path:
+            self.free_path = self.fl.path
+            self.free_txt = self.free_space(self.fl.path)
+            self.free_at = now
+            return self.free_txt
+        if not self.free_busy and now - self.free_at > 2.0:
+            self.free_busy = True
+            path = self.fl.path
+
+            def done(txt):
+                self.free_busy = False
+                if path == self.fl.path:
+                    self.free_txt = txt
+                    self.free_at = time.monotonic()
+                    self.invalidate()
+
+            def fail(err):
+                self.free_busy = False
+
+            self.thread(lambda: self.free_space(path), done, fail)
+        return self.free_txt
+
+    @staticmethod
+    def free_space(path):
+        try:
+            st = os.statvfs(path)
+            return human_size(st.f_bavail * st.f_frsize) + ' free'
+        except OSError:
+            return ''
 
     def draw_transfer(self, cv, w, y):
         """Status line while a copy runs: counts, bar, current name and a Stop button."""
@@ -601,11 +684,18 @@ class Files(App):
     def load_preview(self, e, w, h, key):
         from .. import imaging
         if e.isdir:
-            try:
-                names = sorted(os.listdir(e.path))[:h]
-                self.preview = ('txt', [n for n in names if not n.startswith('.')])
-            except OSError:
-                pass
+            def work():
+                try:
+                    return sorted(os.listdir(e.path))[:h]
+                except OSError:
+                    return None
+
+            def done(names):
+                if names is not None and self.preview_key == key:
+                    self.preview = ('txt', [n for n in names if not n.startswith('.')])
+                    self.invalidate()
+
+            self.thread(work, done, lambda err: None)
             return
         if e.kind == 'image':
             def work():
@@ -617,16 +707,23 @@ class Files(App):
                     self.preview = ('img', imaging.render_fit(self.wm, img, w, h))
                     self.invalidate()
             self.thread(work, done, lambda err: None)
-        elif e.kind in ('text', 'exec', 'web', 'sheet') and e.size < 5_000_000 and not looks_binary(e.path):
-            try:
+        elif e.kind in ('text', 'exec', 'web', 'sheet') and e.size < 5_000_000:
+            def work():
+                if looks_binary(e.path):
+                    return None
                 with open(e.path, errors='replace') as f:
-                    txt = f.read(4000)
+                    return f.read(4000)
+
+            def done(txt):
+                if txt is None or self.preview_key != key:
+                    return
                 lines = []
                 for ln in txt.replace('\t', '    ').split('\n'):
                     lines.extend(wrap_text(ln, w) or [''])
                 self.preview = ('txt', lines)
-            except OSError:
-                pass
+                self.invalidate()
+
+            self.thread(work, done, lambda err: None)
 
     # ------------------------------------------------------------ actions
     def menu_items(self, e):

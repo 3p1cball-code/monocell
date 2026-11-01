@@ -224,14 +224,35 @@ class System(App):
             'py': platform.python_version(),
         }
         self.slow = {}
+        self.slow_busy = False
         self.refresh_slow()
         self.update()
         self.every(1.5, self.update)
-        self.every(10, self.refresh_slow)
+        self.every(10, self.refresh_slow_async)
 
     def refresh_slow(self):
         self.slow = {'ips': ip_addrs(), 'disks': disks(), 'bat': battery(),
                      'bat_time': hardware.battery_time(), 'fans': fans()}
+
+    def refresh_slow_async(self):
+        """Same data as refresh_slow, collected off the UI thread (statvfs on shares)."""
+        if self.slow_busy:
+            return
+        self.slow_busy = True
+
+        def work():
+            return {'ips': ip_addrs(), 'disks': disks(), 'bat': battery(),
+                    'bat_time': hardware.battery_time(), 'fans': fans()}
+
+        def done(res):
+            self.slow_busy = False
+            self.slow = res
+            self.invalidate()
+
+        def fail(err):
+            self.slow_busy = False
+
+        self.thread(work, done, fail)
 
     def update(self):
         cur = cpu_times()

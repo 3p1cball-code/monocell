@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from monocell import media, transfer  # noqa: E402
 from monocell.apps.files import Files  # noqa: E402
 from monocell.screen import Buffer, Canvas  # noqa: E402
-from monocell.util import HOME  # noqa: E402
+from monocell.util import HOME, human_size  # noqa: E402
 
 
 class FakeCfg(dict):
@@ -38,6 +38,7 @@ class FakeTimer:
 class FakeLoop:
     def __init__(self):
         self.timers = []
+        self.thread_calls = 0
 
     def every(self, *a, **kw):
         return None
@@ -48,6 +49,7 @@ class FakeLoop:
         return t
 
     def run_in_thread(self, fn, done=None, error=None):
+        self.thread_calls += 1
         try:
             res = fn()
         except Exception as e:
@@ -274,6 +276,126 @@ class TestTransferBar(unittest.TestCase):
     def test_knowing_nothing_does_not_divide_by_zero(self):
         a, row = self.app(total=0, done=0)
         self.assertIn('0%', row)
+
+
+class DeferredLoop(FakeLoop):
+    """Keeps worker callbacks so a test can finish them later."""
+
+    def __init__(self):
+        super().__init__()
+        self.pending = []
+
+    def run_in_thread(self, fn, done=None, error=None):
+        self.thread_calls += 1
+        self.pending.append((fn, done, error))
+
+    def finish(self):
+        fn, done, error = self.pending.pop(0)
+        try:
+            res = fn()
+        except Exception as e:
+            if error:
+                error(e)
+        else:
+            if done:
+                done(res)
+
+
+class TestSlowShares(unittest.TestCase):
+    """A slow network share must never block drawing (sshfs waits in the UI thread)."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.sub = os.path.join(self.root, 'sub')
+        os.makedirs(self.sub)
+        with open(os.path.join(self.root, 'note.txt'), 'w') as f:
+            f.write('hello\n')
+        p = mock.patch.object(media, 'snapshot', return_value=[])
+        p.start()
+        self.addCleanup(p.stop)
+
+    def open(self, loop=None):
+        wm = FakeWM(files_dir=self.root)
+        if loop is not None:
+            wm.loop = loop
+        app = Files(wm, FakeWin())
+        self.addCleanup(app.on_close)
+        return app, wm
+
+    def draw(self, app, n=1):
+        buf = Buffer(100, 30)
+        cv = Canvas(buf)
+        for _ in range(n):
+            app.zones = []
+            app.draw(cv, True)
+        return ''.join(buf.ch[29])
+
+    def test_free_space_is_looked_up_once_not_per_draw(self):
+        app, _ = self.open()
+        with mock.patch('os.statvfs', wraps=os.statvfs) as m:
+            self.draw(app, 20)
+        self.assertEqual(m.call_count, 1)
+        self.assertIn('free', self.draw(app))
+
+    def test_free_space_updates_when_the_folder_changes(self):
+        app, _ = self.open()
+        with mock.patch('os.statvfs', wraps=os.statvfs) as m:
+            self.draw(app, 5)
+            app.go(self.sub)
+            self.draw(app, 5)
+        self.assertEqual(m.call_count, 2)
+
+    def test_status_line_reads_exactly_as_before(self):
+        app, _ = self.open()
+        st = os.statvfs(self.root)
+        want = human_size(st.f_bavail * st.f_frsize) + ' free'
+        row = self.draw(app)
+        self.assertTrue(row.startswith('2 items'), row)
+        self.assertIn(want, row)
+
+    def test_missing_free_space_shows_nothing(self):
+        app, _ = self.open()
+        with mock.patch('os.statvfs', side_effect=OSError('gone')):
+            row = self.draw(app)
+        self.assertNotIn('free', row)
+
+    def test_poll_measures_the_folder_in_a_worker(self):
+        loop = DeferredLoop()
+        app, _ = self.open(loop)
+        with mock.patch('os.stat', wraps=os.stat) as m:
+            app.poll()
+            self.assertEqual(m.call_count, 0)       # nothing in the UI thread
+            loop.finish()
+        self.assertEqual(m.call_count, 1)
+
+    def test_a_late_poll_result_for_the_old_folder_is_ignored(self):
+        loop = DeferredLoop()
+        app, _ = self.open(loop)
+        app.poll()
+        app.go(self.sub)                            # the user moved on
+        app.mtime = 12345
+        loop.finish()                               # the old stat arrives now
+        self.assertEqual(app.fl.path, self.sub)
+        self.assertEqual(app.mtime, 12345)
+        self.assertEqual(app.fl.entries, [])
+
+    def test_async_refresh_applies_the_listing(self):
+        app, _ = self.open()
+        app.fl.refresh_async()
+        self.assertEqual([e.name for e in app.fl.entries], ['sub', 'note.txt'])
+
+    def test_preview_reading_is_done_on_a_worker(self):
+        loop = DeferredLoop()
+        app, _ = self.open(loop)
+        e = [x for x in app.fl.entries if x.name == 'note.txt'][0]
+        key = ('note.txt',)
+        app.preview_key = key
+        app.load_preview(e, 30, 10, key)
+        self.assertIsNone(app.preview)
+        loop.finish()
+        self.assertEqual(app.preview[0], 'txt')
+        self.assertIn('hello', ''.join(app.preview[1]))
 
 
 if __name__ == '__main__':
