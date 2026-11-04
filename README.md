@@ -481,7 +481,10 @@ so lassen sich beliebige Auflösungen und Seitenverhältnisse reproduzierbar pr�
 
 Auf dem X61s gibt es einen echten Text-Login: `getty` auf tty1–3, **Fingerprint** über
 PAM (`pam_fprintd`, Passwort bleibt Fallback) und nach dem Login startet monocell auf
-tty1. tty2/tty3 bleiben normale Shell-Logins (Rettungsweg/SSH). Das Startmenü bietet
+tty1. Der Ablauf ist: **Benutzername eingeben, Enter, dann den Finger über den Sensor
+ziehen** (das Login-Fenster sagt das auch). Für den Wischsensor sind 3 Versuche und
+45 s Zeit eingestellt (`install-extras.sh`, änderbar über `FPRINT_TRIES`/`FPRINT_TIMEOUT`);
+Debian stand vorher auf 1 Versuch / 3 s, da war ein leicht schräger Wisch sofort vorbei. tty2/tty3 bleiben normale Shell-Logins (Rettungsweg/SSH). Das Startmenü bietet
 **Reboot** und **Shut down** (mit Rückfrage, per Polkit für den Benutzer freigegeben).
 Beim Beenden von monocell endet die Sitzung und der Login erscheint wieder.
 Ein loginloser Kiosk-Modus ist optional: `install-vt.sh --kiosk`.
@@ -490,8 +493,9 @@ Ein loginloser Kiosk-Modus ist optional: `install-vt.sh --kiosk`.
 (OSC), der MONOCELL-Wortmarke in Theme-Farben, Hostname, Debian-Version, Datum/Uhrzeit
 und dem Fingerabdruck-Hinweis, zentriert für die Konsolengröße.
 `sudo deploy/x61s/install-extras.sh --user NAME` installiert ihn (dazu die
-`=`-Reparatur im 3270-Konsolenfont und den Update-Helfer), `--issue-only` erzeugt ihn
-nach einem Theme-Wechsel neu, `--uninstall` baut alles zurück.
+`=`-Reparatur im 3270-Konsolenfont, den Update-Helfer und die Fingerprint-Optionen),
+`--issue-only` erzeugt ihn nach einem Theme-Wechsel neu, `--uninstall` baut alles
+zurück.
 
 ## Auf dem X61s (Kernel-VT)
 

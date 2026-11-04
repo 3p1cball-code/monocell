@@ -122,11 +122,11 @@ def build(th, cols, rows, user_hint=True):
     out.append(centred('\\d  \\t', DIM, 28))
     out.append('\n')
     if user_hint:
-        out.append(centred('Finger auf den Sensor legen oder Passwort eingeben', ACCENT))
-    out.append('\n')
-    # no newline at the end: agetty prints "host login:" right after, so the
-    # padding centres the prompt under the mark
-    out.append(sgr(TEXT, DESK) + ' ' * max(0, (cols - 24) // 2))
+        out.append(centred('Benutzername eingeben, dann Finger scannen', ACCENT))
+        out.append(centred('(Passwort geht jederzeit als Fallback)', DIM))
+    # end with a plain newline: agetty prints "host login:" at the left margin,
+    # and so do login/PAM (the fingerprint prompt reads as normal terminal text)
+    out.append(sgr(TEXT, DESK) + '\n')
     return ''.join(out)
 
 def preview(text, th):

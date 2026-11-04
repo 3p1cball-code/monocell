@@ -35,10 +35,16 @@ class TestIssue(unittest.TestCase):
         plain = re.sub(r'\\(n|d|t|S\{PRETTY_NAME\})', '', text)
         self.assertNotIn('\\', plain)
 
-    def test_prompt_is_centred(self):
+    def test_prompt_starts_at_the_left_margin(self):
+        # agetty prints the login prompt right after the issue; login and PAM
+        # messages must line up with it, so the issue ends with a newline
         text = make_issue.build(self.th, 113, 48)
-        last = text.rsplit('\n', 1)[1]
-        self.assertEqual(len(re.sub(r'\x1b\[[0-9;]*m', '', last)), (113 - 24) // 2)
+        self.assertTrue(text.endswith('\n'))
+        plain = re.sub(r'\x1b\[[0-9;]*m', '', text)
+        self.assertEqual(plain.rsplit('\n', 2)[1].strip(), '')
+        plain = re.sub(r'\x1b\[[0-9;]*m', '', text)
+        self.assertIn('Benutzername eingeben, dann Finger scannen', plain)
+        self.assertIn('Passwort geht jederzeit als Fallback', plain)
 
     def test_fits_narrow_console(self):
         text = make_issue.build(self.th, 80, 25)

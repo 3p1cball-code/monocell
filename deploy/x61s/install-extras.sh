@@ -9,9 +9,12 @@
 #  3. updates: /usr/local/sbin/monocell-apt + a sudoers rule that allows exactly
 #     "monocell-apt update" and "monocell-apt upgrade" without a password, for
 #     the Updates app (System -> Updates)
+#  4. fingerprint: pam_fprintd gets more tries and a longer timeout (the swipe
+#     sensor fails on a slightly diagonal swipe; Debian had 1 try / 3 seconds)
 #
 # Options: --user NAME (default: the sudo user)  --issue-only (after a theme
 # change)  --uninstall (restore the originals)
+# Env: FPRINT_TRIES=3 FPRINT_TIMEOUT=45 to tune the fingerprint module
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
@@ -33,10 +36,14 @@ HOME_DIR=$(getent passwd "$USER_NAME" | cut -d: -f6)
 FONT=/usr/share/consolefonts/Lat15-3270.psf.gz
 HELPER=/usr/local/sbin/monocell-apt
 SUDOERS=/etc/sudoers.d/monocell-apt
+PAM=/etc/pam.d/common-auth
+FPRINT_TRIES=${FPRINT_TRIES:-3}
+FPRINT_TIMEOUT=${FPRINT_TIMEOUT:-45}
 
 if [ "$MODE" = uninstall ]; then
     [ -f "$FONT.monocell-orig" ] && mv -f "$FONT.monocell-orig" "$FONT" && echo "font restored"
     [ -f /etc/issue.monocell-orig ] && mv -f /etc/issue.monocell-orig /etc/issue && echo "issue restored"
+    [ -f "$PAM.monocell-orig" ] && mv -f "$PAM.monocell-orig" "$PAM" && echo "pam restored"
     rm -f "$SUDOERS" "$HELPER" && echo "update helper removed"
     exit 0
 fi
@@ -83,4 +90,13 @@ else
     echo "sudoers rule failed the visudo check - not installed" >&2
 fi
 rm -f "$tmp"
-echo "done. The login screen shows at the next login prompt (log out or reboot)."
+
+# 4. fingerprint retries / timeout -------------------------------------------
+if grep -q 'pam_fprintd\.so' "$PAM"; then
+    [ -f "$PAM.monocell-orig" ] || cp -p "$PAM" "$PAM.monocell-orig"
+    python3 "$ROOT/tools/set_pam_fprintd.py" "$PAM" \
+        --tries "$FPRINT_TRIES" --timeout "$FPRINT_TIMEOUT"
+fi
+
+echo "done. The login screen and the fingerprint settings apply at the next login."
+

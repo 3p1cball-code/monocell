@@ -183,6 +183,9 @@ Das Skript
 * erzeugt `/etc/issue` mit Theme-Palette (OSC), MONOCELL-Wortmarke, Hostname,
   Debian-Version, Datum/Uhrzeit und Fingerabdruck-Hinweis (`make_issue.py`,
   Sicherung `/etc/issue.monocell-orig`),
+* stellt `pam_fprintd` auf **3 Versuche / 45 s** (statt 1 / 3 s); ein leicht
+  schräger Wisch beendet die Anmeldung damit nicht mehr sofort. Feiner über
+  `FPRINT_TRIES`/`FPRINT_TIMEOUT` beim Aufruf; Sicherung `common-auth.monocell-orig`,
 * installiert `/usr/local/sbin/monocell-apt` und
   `/etc/sudoers.d/monocell-apt`: erlaubt dem Benutzer **nur**
   `monocell-apt update` und `monocell-apt upgrade` ohne Passwort, für die
