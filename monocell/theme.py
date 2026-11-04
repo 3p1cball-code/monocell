@@ -314,6 +314,7 @@ DEFAULT_CONFIG = {
     'clock_24h': True,
     'desktop_logo': False,
     'media_prompt': False,        # ask before mounting a newly plugged-in medium (off: Files only)
+    'battery_suspend': True,      # at 3% on battery: suspend (a toast announces it)
     'wallpaper': '',
     'files_dir': '',              # Files: the folder it was last in
     'background': 'auto',         # auto | logo | plain | image | matrix

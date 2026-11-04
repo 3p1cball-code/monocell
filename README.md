@@ -136,7 +136,9 @@ monocell-clip --clear
   stehen die **Wechselmedien** (USB-Stick, SD-Karte, CF/Microdrive): Klick mountet ein
   nicht gemountetes Medium und springt hinein, Rechtsklick bietet Mount/Unmount,
   gemountete sind normal, ungemountete gedimmt. Siehe *Wechselmedien* unten.
-  **Kopieren/Verschieben zeigt Fortschritt** in der Statuszeile: Dateien gezählt,
+  **Suche:** `Ctrl+F` (oder Rechtsklick → Search…) sucht Namen rekursiv ab dem
+  aktuellen Ordner, zeigt die Treffer mit relativem Pfad und kehrt mit `Esc`
+  zur normalen Liste zurück. **Kopieren/Verschieben zeigt Fortschritt** in der Statuszeile: Dateien gezählt,
   Balken, Prozent, Größe und der aktuelle Name, dazu ein **Stop**-Knopf. Die Größen
   werden vorher zusammengezählt, damit der Balken stimmt; abgebrochene Kopien werden
   weggeräumt (fertige Dateien bleiben), ein Wechsel auf ein anderes Laufwerk läuft
@@ -184,7 +186,10 @@ monocell-clip --clear
   `---`, ```` ``` ````), Undo/Redo, formatbewahrendes Kopieren. `F5` schaltet auf die
   Markdown-Quelle; `Ctrl+P` druckt über PPDS für den IBM Proprinter (10 cpi/6 lpi,
   Seitenvorschub), Bilder als Zeichen mit transparentem Schwarz. `.docx`/`.odt`
-  importieren, `.docx` exportieren. Kein Kursiv – Konsole und Nadeldrucker können es
+  importieren. **Export:** `.docx` (Bilder werden echt eingebettet, inline und
+  seitenbreit skaliert; fehlende Bilder bleiben als `[Bild: alt]`), `TXT` als
+  reiner Text ohne Markup (Listen behalten `- `, Bilder werden zu `[Bild: alt]`)
+  und `.md` über Speichern/Speichern unter. Kein Kursiv – Konsole und Nadeldrucker können es
   nicht.
 * **Sheets** – Formeln (`=SUM(A1:A5)`, `IF`, `ROUND`, …), CSV/TSV/XLSX/ODS lesen,
   CSV/XLSX/nativ schreiben, Sortieren, Spaltenbreiten.
@@ -488,6 +493,11 @@ Debian stand vorher auf 1 Versuch / 3 s, da war ein leicht schräger Wisch sofor
 **Reboot** und **Shut down** (mit Rückfrage, per Polkit für den Benutzer freigegeben).
 Beim Beenden von monocell endet die Sitzung und der Login erscheint wieder.
 Ein loginloser Kiosk-Modus ist optional: `install-vt.sh --kiosk`.
+
+**Sperren und Energie:** Das Startmenü hat **Lock screen** (`vlock -a`, Passwort/
+Fingerprint über PAM) und **Suspend**. Bei 20 %, 10 % und 5 % Akku kommt ein
+Hinweis, bei 3 % suspendiert Monocell nach kurzer Ankündigung (abschaltbar unter
+Einstellungen → Desktop → *Suspend when the battery is critical*).
 
 **Login-Screen:** `tools/make_issue.py` schreibt `/etc/issue` mit der Theme-Palette
 (OSC), der MONOCELL-Wortmarke in Theme-Farben, Hostname, Debian-Version, Datum/Uhrzeit

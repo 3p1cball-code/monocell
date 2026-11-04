@@ -74,6 +74,45 @@ class Entry:
     __slots__ = ('name', 'path', 'isdir', 'size', 'mtime', 'kind', 'link', 'mode')
 
 
+def entry_at(path, name=None):
+    e = Entry()
+    e.name = name if name is not None else os.path.basename(path)
+    e.path = path
+    try:
+        st = os.stat(path)
+        lst = os.lstat(path)
+        e.link = stat.S_ISLNK(lst.st_mode)
+        e.isdir = stat.S_ISDIR(st.st_mode)
+        e.size = st.st_size
+        e.mtime = st.st_mtime
+        e.mode = st.st_mode
+    except OSError:
+        e.isdir, e.size, e.mtime, e.link, e.mode = False, 0, 0, True, 0
+    if e.isdir:
+        e.kind = 'dir'
+    else:
+        e.kind = kind_of(path)
+        if e.kind == 'text' and e.mode & 0o111:
+            e.kind = 'exec'
+    return e
+
+
+def find_entries(root, term, limit=400):
+    """Names below root that contain term (case-insensitive, no hidden dirs)."""
+    term = term.lower()
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith('.'))
+        for n in sorted(filenames) + dirnames:
+            if n.startswith('.') or term not in n.lower():
+                continue
+            p = os.path.join(dirpath, n)
+            out.append(entry_at(p, os.path.relpath(p, root)))
+            if len(out) >= limit:
+                return sorted(out, key=lambda e: (not e.isdir, e.name.lower()))
+    return sorted(out, key=lambda e: (not e.isdir, e.name.lower()))
+
+
 def list_dir(path, hidden=False, sort='name'):
     out = []
     try:
@@ -83,27 +122,7 @@ def list_dir(path, hidden=False, sort='name'):
     for n in names:
         if not hidden and n.startswith('.'):
             continue
-        p = os.path.join(path, n)
-        e = Entry()
-        e.name = n
-        e.path = p
-        try:
-            st = os.stat(p)
-            lst = os.lstat(p)
-            e.link = stat.S_ISLNK(lst.st_mode)
-            e.isdir = stat.S_ISDIR(st.st_mode)
-            e.size = st.st_size
-            e.mtime = st.st_mtime
-            e.mode = st.st_mode
-        except OSError:
-            e.isdir, e.size, e.mtime, e.link, e.mode = False, 0, 0, True, 0
-        if e.isdir:
-            e.kind = 'dir'
-        else:
-            e.kind = kind_of(p)
-            if e.kind == 'text' and e.mode & 0o111:
-                e.kind = 'exec'
-        out.append(e)
+        out.append(entry_at(os.path.join(path, n), n))
     key = {'name': lambda e: (not e.isdir, e.name.lower()),
            'size': lambda e: (not e.isdir, -e.size),
            'date': lambda e: (not e.isdir, -e.mtime)}[sort]
@@ -191,9 +210,16 @@ class FileList:
         self.typed_t = 0
         self.filter = None
         self.reloading = False
+        self.search = None
         self.refresh()
 
+    def show_search(self, root, term, entries):
+        self.search = (root, term)
+        self.path = root
+        self._apply(entries)
+
     def refresh(self, keep=None):
+        self.search = None
         try:
             ents = list_dir(self.path, self.hidden, self.sort)
             if self.filter:
@@ -216,7 +242,7 @@ class FileList:
 
     def refresh_async(self, keep=None):
         """Re-list on a worker so a slow share cannot stall drawing."""
-        if self.reloading:
+        if self.reloading or self.search:
             return
         path, hidden, sort, filt = self.path, self.hidden, self.sort, self.filter
         self.reloading = True
@@ -511,7 +537,10 @@ class Files(App):
         self.invalidate()
 
     def update_title(self):
-        self.set_title(os.path.basename(self.fl.path.rstrip('/')) or '/')
+        name = os.path.basename(self.fl.path.rstrip('/')) or '/'
+        if self.fl.search:
+            name = 'Search: %s' % self.fl.search[1]
+        self.set_title(name)
 
     def go(self, path, record=True, select=None):
         old = self.fl.path
@@ -532,6 +561,34 @@ class Files(App):
         else:
             open_path(self.wm, e.path)
 
+    def start_search(self):
+        def ok(term):
+            term = (term or '').strip()
+            if not term:
+                return
+            root = self.fl.path
+            self.wm.toast('Searching "%s" ...' % term, 'accent', 2)
+
+            def work():
+                return find_entries(root, term)
+
+            def done(res):
+                self.fl.show_search(root, term, res)
+                self.update_title()
+                self.invalidate()
+                self.wm.toast('%d hit%s for "%s"' % (len(res), '' if len(res) == 1 else 's', term),
+                              'accent' if res else 'yellow', 4)
+
+            self.thread(work, done)
+        self.wm.prompt('Search', 'Name contains (in %s and below):' % shorten_path(self.fl.path, 40),
+                       '', ok, parent=self.win)
+
+    def end_search(self):
+        if self.fl.search:
+            self.fl.refresh(keep=None)
+            self.update_title()
+            self.invalidate()
+
     # ------------------------------------------------------------ drawing
     def draw(self, cv, focused):
         th = self.th
@@ -544,6 +601,13 @@ class Files(App):
         pw = w - x - 9
         if self.pathfield:
             self.pathfield.draw(cv, x, 0, pw, th, focused)
+        elif self.fl.search:
+            root, term = self.fl.search
+            a = th.c('accent', 'field')
+            cv.fill(x, 0, pw, 1, a)
+            cv.put(x + 1, 0, fit('Search "%s" in %s - %d hits  (Esc)'
+                                 % (term, shorten_path(root, max(8, pw - 40)), len(self.fl.entries)),
+                                 pw - 2), a)
         else:
             a = th.c('text', 'field')
             cv.fill(x, 0, pw, 1, a)
@@ -742,6 +806,7 @@ class Files(App):
             MenuItem('Rename', self.rename, 'F2', enabled=bool(e)),
             MenuItem('Move to trash', self.delete, 'Del', enabled=has),
             None,
+            MenuItem('Search...', self.start_search, 'Ctrl+F'),
             MenuItem('New folder', self.new_folder, 'F7'),
             MenuItem('New file', self.new_file),
             MenuItem('Terminal here', lambda: self.wm.open('terminal', cwd=self.fl.path)),
@@ -976,6 +1041,12 @@ class Files(App):
 
     def on_key(self, ev):
         k = ev.key
+        if k == 'ctrl+f':
+            self.start_search()
+            return True
+        if k == 'esc' and self.fl.search:
+            self.end_search()
+            return True
         if self.pathfield:
             if k == 'esc':
                 self.pathfield = None

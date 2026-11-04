@@ -103,7 +103,60 @@ class TestRenderer(unittest.TestCase):
         self.assertTrue(any('missing' in chars for chars, _ in rows))
 
 
+class TestPlainExport(unittest.TestCase):
+    def test_plain_text_has_no_markup(self):
+        from monocell import richdoc
+        doc = richdoc.parse('# Titel\n\nText <u>unter</u> **fett**\n- Punkt\n> Zitat\n---\n'
+                            '![Alt](x.png){x=0 w=9 wrap=square}\ndanach')
+        text = richdoc.export_text(doc)
+        self.assertIn('Titel', text)
+        self.assertIn('Text unter fett', text)
+        self.assertIn('- Punkt', text)
+        self.assertIn('> Zitat', text)
+        self.assertIn('-' * 40, text)
+        self.assertIn('[Bild: Alt]', text)
+        for mark in ('<u>', '**', '# '):
+            self.assertNotIn(mark, text)
+
+
 class TestDocxExport(unittest.TestCase):
+    def test_picture_is_embedded(self):
+        import zipfile
+        from PIL import Image
+        from monocell.apps.writer import write_docx
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, d)
+        Image.new('RGB', (40, 20), (200, 10, 10)).save(os.path.join(d, 'p.png'))
+        p = os.path.join(d, 'x.docx')
+        write_docx(p, 'Text\n![Alt](p.png){x=0 w=10 wrap=square}\ndanach', d)
+        with zipfile.ZipFile(p) as z:
+            names = z.namelist()
+            doc = z.read('word/document.xml').decode('utf-8')
+            rels = z.read('word/_rels/document.xml.rels').decode('utf-8')
+            ct = z.read('[Content_Types].xml').decode('utf-8')
+            media = [n for n in names if n.startswith('word/media/')]
+            self.assertEqual(media, ['word/media/image1.png'])
+            self.assertEqual(z.read(media[0]), open(os.path.join(d, 'p.png'), 'rb').read())
+        self.assertIn('<w:drawing>', doc)
+        self.assertIn('descr="Alt"', doc)
+        for ns in ('xmlns:r=', 'xmlns:wp=', 'xmlns:a=', 'xmlns:pic='):
+            self.assertIn(ns, doc)
+        self.assertIn('media/image1.png', rels)
+        self.assertIn('ContentType="image/png"', ct)
+        self.assertIn('<w:t xml:space="preserve">Text</w:t>', doc)
+
+    def test_missing_picture_keeps_a_placeholder(self):
+        import zipfile
+        from monocell.apps.writer import write_docx
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, d)
+        p = os.path.join(d, 'x.docx')
+        write_docx(p, '![Alt](weg.png)', d)
+        with zipfile.ZipFile(p) as z:
+            doc = z.read('word/document.xml').decode('utf-8')
+            self.assertFalse([n for n in z.namelist() if n.startswith('word/media/')])
+        self.assertIn('[Bild: Alt]', doc)
+
     def test_tags_and_image_placeholder(self):
         import zipfile
         from monocell.apps.writer import write_docx

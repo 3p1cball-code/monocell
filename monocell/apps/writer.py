@@ -86,46 +86,143 @@ def _runs(text):
     return out
 
 
-def write_docx(path, text):
+DOCX_IMG_TYPES = {'.png': ('png', 'image/png'), '.jpg': ('jpeg', 'image/jpeg'),
+                  '.jpeg': ('jpeg', 'image/jpeg'), '.gif': ('gif', 'image/gif'),
+                  '.bmp': ('bmp', 'image/bmp')}
+EMU_INCH = 914400
+EMU_CM = 360000
+MAX_W = int(15 * EMU_CM)          # 15 cm inside the 16 cm text column
+MAX_H = int(18 * EMU_CM)
+
+
+def _docx_image_data(path):
+    """(bytes, ext, content_type, px_w, px_h) for a picture, or None.
+
+    PNG/JPEG/GIF/BMP go in unchanged; other formats are converted through Pillow.
+    """
+    try:
+        with open(path, 'rb') as f:
+            raw = f.read()
+    except OSError:
+        return None
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        from .. import imaging as imaging_mod
+        img = imaging_mod.load(path)
+        pw, ph = img.w, img.h
+    except Exception:
+        pw = ph = 0
+    if ext in DOCX_IMG_TYPES:
+        kind, ctype = DOCX_IMG_TYPES[ext]
+        return raw, kind, ctype, pw, ph
+    try:
+        from PIL import Image
+        import io
+        with Image.open(io.BytesIO(raw)) as im:
+            if pw <= 0:
+                pw, ph = im.size
+            buf = io.BytesIO()
+            im.convert('RGB').save(buf, 'PNG')
+            return buf.getvalue(), 'png', 'image/png', pw, ph
+    except Exception:
+        return None
+
+
+def _drawing_xml(rid, pid, alt, cx, cy, fname):
+    return ('<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>'
+            '<wp:inline distT="0" distB="0" distL="0" distR="0">'
+            '<wp:extent cx="%d" cy="%d"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
+            '<wp:docPr id="%d" name="Bild %d" descr="%s"/>'
+            '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+            '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+            '<pic:pic><pic:nvPicPr><pic:cNvPr id="%d" name="%s"/><pic:cNvPicPr/></pic:nvPicPr>'
+            '<pic:blipFill><a:blip r:embed="%s"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+            '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="%d" cy="%d"/></a:xfrm>'
+            '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+            '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+            % (cx, cy, pid, pid, escape(alt), pid, escape(fname), rid, cx, cy))
+
+
+def _docx_runs(p):
+    out = []
+    text, st = p.text, p.st
+    i = 0
+    while i < len(text):
+        s = st[i]
+        j = i + 1
+        while j < len(text) and st[j] == s:
+            j += 1
+        props = ''
+        if s.bold:
+            props += '<w:b/>'
+        if s.ul:
+            props += '<w:u w:val="%s"/>' % ('single', 'double', 'thick')[min(s.ul, 3) - 1]
+        if s.size != 1:
+            props += '<w:sz w:val="%d"/>' % (44 if s.size == 2 else 64)
+        rpr = '<w:rPr>%s</w:rPr>' % props if props else ''
+        out.append('<w:r>%s<w:t xml:space="preserve">%s</w:t></w:r>' % (rpr, escape(text[i:j])))
+        i = j
+    return ''.join(out)
+
+
+def write_docx(path, text, base_dir=''):
+    """Markdown/WYSIWYG source -> .docx, with pictures inside the file."""
+    from .. import richdoc
+    doc = richdoc.parse(text)
+    floats = {}
+    for f in doc.floats:
+        floats.setdefault(id(f.anchor), []).append(f)
+    media = []          # (name, bytes, content_type)
+    rels = [('rId1', 'styles', 'styles.xml')]
     paras = []
-    for block in text.split('\n'):
+    for p in doc.paras:
+        for f in floats.get(id(p), ()):
+            src = os.path.expanduser(f.path)
+            if not os.path.isabs(src):
+                src = os.path.join(base_dir or os.getcwd(), src)
+            data = _docx_image_data(src)
+            if data is None:
+                alt = f.alt or os.path.basename(f.path)
+                paras.append('<w:p><w:r><w:t xml:space="preserve">[Bild: %s]</w:t></w:r></w:p>'
+                             % escape(alt))
+                continue
+            raw, kind, ctype, pw, ph = data
+            n = len(media) + 1
+            name = 'image%d.%s' % (n, kind)
+            media.append((name, raw, ctype))
+            rid = 'rId%d' % (n + 1)
+            rels.append((rid, 'image', 'media/' + name))
+            cx = max(1, pw) * 9525
+            cy = max(1, ph) * 9525
+            scale = min(1.0, MAX_W / cx, MAX_H / cy)
+            cx, cy = max(1, int(cx * scale)), max(1, int(cy * scale))
+            alt = f.alt or os.path.splitext(os.path.basename(f.path))[0]
+            paras.append(_drawing_xml(rid, n, alt, cx, max(1, cy), name))
         style = None
-        t = block
-        m = re.match(r'(#{1,6})\s+(.*)', t)
-        if m:
-            style = 'Heading%d' % len(m.group(1))
-            t = m.group(2)
-        else:
-            m = re.match(r'\s*[-*+]\s+(.*)', t)
-            if m:
-                style = 'ListBullet'
-                t = m.group(1)
-        if not t.strip() and style is None:
+        if p.kind == 'h':
+            style = 'Heading%d' % max(1, min(6, p.level))
+        elif p.kind == 'li':
+            style = 'ListBullet'
+        elif p.kind == 'rule':
+            paras.append('<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" '
+                         'w:color="888888"/></w:pBdr></w:pPr></w:p>')
+            continue
+        elif p.kind == 'code':
+            style = 'Code'
+        if not p.text and style is None:
+            paras.append('<w:p/>')
             continue
         ppr = '<w:pPr><w:pStyle w:val="%s"/></w:pPr>' % style if style else ''
-        image = writer_doc.IMAGE_RE.match(block)
-        if image:
-            alt = image.group(1) or os.path.splitext(os.path.basename(image.group(2)))[0]
-            runs = ('<w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve">[Bild: %s]</w:t></w:r>'
-                    % escape(alt))
-            paras.append('<w:p>%s%s</w:p>' % (ppr, runs))
-            continue
-        runs = ''
-        for s in writer_doc.parse_inline(t, italic=False):
-            props = ''
-            if s.bold:
-                props += '<w:b/>'
-            if s.ul:
-                props += '<w:u w:val="%s"/>' % ('single', 'double', 'thick')[min(s.ul, 3) - 1]
-            if s.size != 1:
-                props += '<w:sz w:val="%d"/>' % (44 if s.size == 2 else 64)
-            rpr = '<w:rPr>%s</w:rPr>' % props if props else ''
-            runs += '<w:r>%s<w:t xml:space="preserve">%s</w:t></w:r>' % (rpr, escape(s.text))
-        paras.append('<w:p>%s%s</w:p>' % (ppr, runs))
-    doc = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-           '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>%s'
-           '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1134" '
-           'w:left="1417" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>') % ''.join(paras)
+        paras.append('<w:p>%s%s</w:p>' % (ppr, _docx_runs(p)))
+    doc_xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+               '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+               'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+               'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+               'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+               'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>%s'
+               '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" '
+               'w:bottom="1134" w:left="1417" w:header="708" w:footer="708" w:gutter="0"/>'
+               '</w:sectPr></w:body></w:document>') % ''.join(paras)
     styles = ['<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/>'
               '<w:pPr><w:spacing w:after="160"/></w:pPr><w:rPr><w:sz w:val="22"/></w:rPr></w:style>']
     for lvl, size in ((1, 36), (2, 30), (3, 26), (4, 24), (5, 22), (6, 22)):
@@ -135,29 +232,44 @@ def write_docx(path, text):
                       '<w:rPr><w:b/><w:sz w:val="%d"/></w:rPr></w:style>' % (lvl, lvl, lvl - 1, size))
     styles.append('<w:style w:type="paragraph" w:styleId="ListBullet"><w:name w:val="List Bullet"/>'
                   '<w:basedOn w:val="Normal"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:style>')
+    styles.append('<w:style w:type="paragraph" w:styleId="Code"><w:name w:val="Code"/>'
+                  '<w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="0"/></w:pPr>'
+                  '<w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/><w:sz w:val="20"/></w:rPr></w:style>')
     styles_xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles '
                   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">%s</w:styles>') % ''.join(styles)
-    ct = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    ct = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
           '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
           '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-          '<Default Extension="xml" ContentType="application/xml"/>'
-          '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-          '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
-          '</Types>')
-    rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
-            '</Relationships>')
-    docrels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-               '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-               '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-               '</Relationships>')
+          '<Default Extension="xml" ContentType="application/xml"/>']
+    seen = set()
+    for _name, _raw, ctype in media:
+        ext = _name.rsplit('.', 1)[-1]
+        if ext not in seen:
+            seen.add(ext)
+            ct.append('<Default Extension="%s" ContentType="%s"/>' % (ext, ctype))
+    ct.append('<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-'
+              'officedocument.wordprocessingml.document.main+xml"/>')
+    ct.append('<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-'
+              'officedocument.wordprocessingml.styles+xml"/>')
+    ct.append('</Types>')
+    ct_xml = ''.join(ct)
+    rels_xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">%s'
+                '</Relationships>') % ''.join(
+        '<Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+        'relationships/%s" Target="%s"/>' % (rid, kind, target) for rid, kind, target in rels)
+    root_rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                 '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                 '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+                 'relationships/officeDocument" Target="word/document.xml"/></Relationships>')
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
-        z.writestr('[Content_Types].xml', ct)
-        z.writestr('_rels/.rels', rels)
-        z.writestr('word/document.xml', doc)
+        z.writestr('[Content_Types].xml', ct_xml)
+        z.writestr('_rels/.rels', root_rels)
+        z.writestr('word/document.xml', doc_xml)
         z.writestr('word/styles.xml', styles_xml)
-        z.writestr('word/_rels/document.xml.rels', docrels)
+        z.writestr('word/_rels/document.xml.rels', rels_xml)
+        for name, raw, _ctype in media:
+            z.writestr('word/media/' + name, raw)
 
 
 INLINE = re.compile(r'(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*|_[^_\n]+_)|(`[^`\n]+`)|(\[[^\]\n]+\]\([^)\n]+\))')
@@ -401,7 +513,10 @@ class Writer(App):
         try:
             text = self.doc_text()
             if path.lower().endswith('.docx'):
-                write_docx(path, text)
+                write_docx(path, text, self.base_dir)
+            elif path.lower().endswith('.txt'):
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(richdoc.export_text(self.doc))
             else:
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(text)
@@ -422,12 +537,24 @@ class Writer(App):
                           start=os.path.dirname(self.path) if self.path else None,
                           name=name, parent=self.win)
 
+    def export_txt(self):
+        name = os.path.splitext(os.path.basename(self.path))[0] + '.txt' if self.path else 'document.txt'
+
+        def ok(p):
+            try:
+                with open(p, 'w', encoding='utf-8') as f:
+                    f.write(richdoc.export_text(self.doc))
+                self.wm.toast('Exported ' + os.path.basename(p), 'green')
+            except OSError as e:
+                self.wm.toast(str(e), 'red')
+        self.wm.pick_file(ok, 'save', name=name, parent=self.win)
+
     def export_docx(self):
         name = os.path.splitext(os.path.basename(self.path))[0] + '.docx' if self.path else 'document.docx'
 
         def ok(p):
             try:
-                write_docx(p, self.doc_text())
+                write_docx(p, self.doc_text(), self.base_dir)
                 self.wm.toast('Exported ' + os.path.basename(p), 'green')
             except OSError as e:
                 self.wm.toast(str(e), 'red')
@@ -1036,7 +1163,7 @@ class Writer(App):
         p = self.para() if not self.source else None
         rows = [
             [('New', 'new', False), ('Open', 'open', False), ('Save', 'save', False),
-             ('DOCX', 'docx', False), ('Print', 'print', False), None,
+             ('DOCX', 'docx', False), ('TXT', 'txt', False), ('Print', 'print', False), None,
              ('Img', 'image', False), ('Source' if not self.source else 'Page', 'source', self.source),
              ('Focus', 'focus', self.focus_mode)],
             [('B', 'bold', s0.bold), ('U1', 'underline', s0.ul == 1),
@@ -1322,6 +1449,9 @@ class Writer(App):
         if self.source and key in ('bold', 'underline', 'underline2', 'size1', 'size2', 'size3',
                                    'head', 'list', 'image'):
             self.wm.toast('Formatting works on the page (F5)', 'dim')
+            return
+        if key == 'txt':
+            self.export_txt()
             return
         if key in acts:
             acts[key]()

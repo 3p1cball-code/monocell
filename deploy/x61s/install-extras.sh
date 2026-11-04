@@ -11,6 +11,7 @@
 #     the Updates app (System -> Updates)
 #  4. fingerprint: pam_fprintd gets more tries and a longer timeout (the swipe
 #     sensor fails on a slightly diagonal swipe; Debian had 1 try / 3 seconds)
+#  5. screen lock: installs vlock for "Lock screen" in the start menu
 #
 # Options: --user NAME (default: the sudo user)  --issue-only (after a theme
 # change)  --uninstall (restore the originals)
@@ -92,6 +93,13 @@ fi
 rm -f "$tmp"
 
 # 4. fingerprint retries / timeout -------------------------------------------
+# 5. vlock for the start menu's lock screen --------------------------------
+if ! command -v vlock >/dev/null 2>&1; then
+    echo "installing vlock ..."
+    apt-get install -y --no-install-recommends vlock >/dev/null || \
+        echo "warning: vlock could not be installed" >&2
+fi
+
 if grep -q 'pam_fprintd\.so' "$PAM"; then
     [ -f "$PAM.monocell-orig" ] || cp -p "$PAM" "$PAM.monocell-orig"
     python3 "$ROOT/tools/set_pam_fprintd.py" "$PAM" \

@@ -137,6 +137,7 @@ class StartMenu:
             out.append(('app', name, label, icon, desc))
         out.append(('sep',))
         out += [('foot', 'help', 'Help & shortcuts'), ('foot', 'screenshot', 'Text screenshot'),
+                ('foot', 'lock', 'Lock screen'), ('foot', 'suspend', 'Suspend'),
                 ('foot', 'exit', 'Exit monocell'),
                 ('foot', 'reboot', 'Reboot'), ('foot', 'shutdown', 'Shut down')]
         return out
@@ -207,8 +208,8 @@ class StartMenu:
                 on = idx == cur
                 a = th.c('on_accent', 'accent') if on else th.c('text', 'menu')
                 cv.fill(x + 1, ry, w - 1, 1, a)
-                icon = {'help': ' ? ', 'screenshot': ' * ', 'exit': ' x ',
-                        'reboot': ' ^ ', 'shutdown': ' v '}[r[1]]
+                icon = {'help': ' ? ', 'screenshot': ' * ', 'lock': ' # ', 'suspend': ' z ',
+                        'exit': ' x ', 'reboot': ' ^ ', 'shutdown': ' v '}[r[1]]
                 cv.put(x + 2, ry, icon, a if on else th.c('accent', 'menu'))
                 cv.put(x + 7, ry, r[2], a)
         if len(rows) > self.avail:
@@ -229,6 +230,11 @@ class StartMenu:
             self.wm.show_help()
         elif r[1] == 'screenshot':
             self.wm.save_text_shot()
+        elif r[1] == 'lock':
+            self.wm.lock_screen()
+        elif r[1] == 'suspend':
+            self.wm.confirm('Suspend', 'Suspend the computer now?',
+                            lambda: self.wm.power('suspend'), yes='Suspend')
         elif r[1] == 'reboot':
             self.wm.confirm_reboot()
         elif r[1] == 'shutdown':
@@ -520,6 +526,8 @@ class WM:
                          or socket.gethostname().split('.')[0])
         self.battery = None
         self.battery_time = None
+        self._batt_level = None
+        self._batt_suspending = False
         self.last_frame = 0.0
         self.bar_zones = []
         self.cascade_n = 0
@@ -1410,6 +1418,44 @@ class WM:
             pass
         self.battery = bat
         self.battery_time = hardware.battery_time() if bat else None
+        if bat:
+            self.check_battery(bat[0], bat[1])
+
+    def check_battery(self, cap, status):
+        """Warn as the battery drains; suspend at the last moment (configurable)."""
+        charging = 'Charg' in status or 'Full' in status
+        if charging or cap <= 0:
+            self._batt_level = None
+            self._batt_suspending = False
+            return
+        if cap <= 3 and self.cfg.get('battery_suspend', True) and \
+                not getattr(self, '_batt_suspending', False):
+            self._batt_suspending = True
+            self.toast('Battery %d%% - suspending' % cap, 'red', 8)
+            self.later(3, lambda: self.power('suspend'))
+            return
+        for level in (20, 10, 5):
+            level_seen = getattr(self, '_batt_level', None)
+            if cap <= level and (level_seen is None or level_seen > level):
+                self._batt_level = level
+                self.toast('Battery %d%% - please connect the charger' % cap,
+                           'yellow' if level > 5 else 'red', 7)
+                break
+
+    def lock_screen(self):
+        """Hand the console to vlock; restore the desktop after unlocking."""
+        import shutil
+        vlock = shutil.which('vlock')
+        if not vlock:
+            self.toast('vlock is not installed (run deploy/x61s/install-extras.sh)', 'yellow', 6)
+            return
+        self.term.stop()
+        try:
+            subprocess.run([vlock, '-a'], check=False)
+        finally:
+            self.term.start()
+            self.dirty = True
+            self.on_resize()
 
     # ---------------------------------------------------------- hardware controls
     def set_volume(self, percent, notify=True):
@@ -2343,6 +2389,8 @@ Alt+M / F11       maximize         Alt+D  show desktop
 Alt+Left/Right    snap half        Alt+T  tile all
 Alt+Shift+Arrows  resize           Ctrl+Alt+Arrows  move
 Alt+Enter         new terminal     Alt+S  text screenshot (.md)
+Start menu:       Lock screen (vlock) and Suspend
+Files:            Ctrl+F searches names below the current folder (Esc ends)
 Alt+, / Alt+.     volume down/up   Alt+0  mute
 Alt+-, / Alt++    brightness down/up
 Alt+PgUp / Alt+PgDn  volume up/down

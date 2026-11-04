@@ -382,6 +382,28 @@ def serialize(doc):
     return '\n'.join(out)
 
 
+def export_text(doc):
+    """Plain text for a .txt export: no markup, lists keep their marker."""
+    out = []
+    by = {}
+    for f in doc.floats:
+        by.setdefault(id(f.anchor), []).append(f)
+    for p in doc.paras:
+        for f in by.get(id(p), ()):
+            out.append('[Bild: %s]' % (f.alt or os.path.basename(f.path)))
+        if p.kind == 'code':
+            out.append(p.text)
+        elif p.kind == 'rule':
+            out.append('-' * 40)
+        elif p.kind == 'li':
+            out.append(' ' * min(p.indent, 12) + '- ' + p.text)
+        elif p.kind == 'quote':
+            out.append('> ' + p.text)
+        else:
+            out.append(p.text)
+    return '\n'.join(out)
+
+
 def plain(doc, a=None, b=None):
     """Plain text of the document (or of a range of positions)."""
     if a is None:

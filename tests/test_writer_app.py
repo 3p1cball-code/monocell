@@ -354,6 +354,56 @@ class TestPictures(WriterCase):
         self.assertIn('![p](p.png)', self.src(app))
 
 
+class TestExport(WriterCase):
+    def test_txt_export_is_plain_text(self):
+        from PIL import Image
+        import tempfile
+        d = tempfile.mkdtemp()
+        Image.new('RGB', (8, 8), (0, 0, 0)).save(os.path.join(d, 'p.png'))
+        path = os.path.join(d, 'd.md')
+        with open(path, 'w') as f:
+            f.write('# Titel\n\nText <u>unter</u> **fett**\n![Alt](p.png){x=0 w=6 wrap=square}\n')
+        app = self.make(None, path)
+        out = os.path.join(d, 'd.txt')
+        app.export_txt()
+        self.wm.picked(out)
+        with open(out) as f:
+            text = f.read()
+        self.assertIn('Titel', text)
+        self.assertIn('Text unter fett', text)
+        self.assertIn('[Bild: Alt]', text)
+        self.assertNotIn('**', text)
+        self.assertNotIn('<u>', text)
+
+    def test_save_as_txt(self):
+        app = self.make('Text **fett**')
+        p = os.path.join(tempfile.mkdtemp(), 'x.txt')
+        app.save(p)
+        with open(p) as f:
+            self.assertEqual(f.read(), 'Text fett')
+
+    def test_toolbar_has_txt(self):
+        app = self.make('x')
+        app.focus_mode = False
+        self.assertIn(' TXT ', '\n'.join(self.draw(app, 110, 30)))
+
+    def test_docx_export_embeds_the_picture(self):
+        import zipfile
+        from PIL import Image
+        d = tempfile.mkdtemp()
+        Image.new('RGB', (40, 20), (0, 90, 0)).save(os.path.join(d, 'p.png'))
+        path = os.path.join(d, 'd.md')
+        with open(path, 'w') as f:
+            f.write('Text\n![Alt](p.png){x=0 w=8 wrap=square}\n')
+        app = self.make(None, path)
+        out = os.path.join(d, 'd.docx')
+        app.export_docx()
+        self.wm.picked(out)
+        with zipfile.ZipFile(out) as z:
+            self.assertIn('word/media/image1.png', z.namelist())
+            self.assertIn('<w:drawing>', z.read('word/document.xml').decode())
+
+
 class TestPage(WriterCase):
     def test_sheet_with_border_and_page_number(self):
         app = self.make('eins zwei')

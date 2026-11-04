@@ -23,6 +23,7 @@ OPTIONS = {
         ('clock_seconds', 'Clock shows seconds', [False, True]),
         ('desktop_logo', 'Desktop logo', [False, True]),
         ('media_prompt', 'Ask to mount removable media', [True, False]),
+        ('battery_suspend', 'Suspend when the battery is critical (3%)', [True, False]),
         ('wallpaper', 'Wallpaper image', 'file'),
         ('symbols', 'Symbols (single-width unicode)', ['auto', 'on', 'off']),
         ('strict_ascii', 'Strict ASCII (transliterate umlauts etc.)', [False, True]),
