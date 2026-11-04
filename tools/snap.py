@@ -116,6 +116,68 @@ FALLBACKS = ['/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf',
              '/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf']
 
 
+def load_psf(path):
+    """(width, height, [glyph byte rows]) of a PSF1/PSF2 font (plain or gzip)."""
+    import gzip
+    raw = open(path, 'rb').read()
+    data = gzip.decompress(raw) if path.endswith('.gz') else raw
+    if data[:2] == b'\x36\x04':
+        mode, height = data[2], data[3]
+        count = 256 if mode & 1 else 512
+        size = height
+        width = 8
+        off = 4
+    else:
+        import struct
+        magic, version, hdr, flags, count, size, height, width = \
+            struct.unpack('<IIIIIIII', data[:32])
+        if magic != 0x864AB572:
+            raise ValueError('not a PSF font: %s' % path)
+        off = hdr
+    glyphs = [data[off + i * size: off + (i + 1) * size] for i in range(count)]
+    return width, height, glyphs
+
+
+def render_psf(vt, path, psf_path):
+    """Pixel-exact console screenshot: the real PSF font and the VT palette."""
+    from PIL import Image
+    width, height, glyphs = load_psf(psf_path)
+    nb = (width + 7) // 8
+    pal = [hex_rgb(h) for h in PRESETS['Ember']]
+    for i, c in vt.palette.items():
+        if 0 <= i < 16:
+            pal[i] = c
+    img = Image.new('RGB', (vt.cols * width, vt.rows * height), pal[0])
+    px = img.load()
+    for y, (chars, attrs) in enumerate(vt.lines):
+        for x in range(vt.cols):
+            a = attrs[x]
+            fg, bg, fl = a & 31, (a >> 5) & 31, a >> 10
+            fg = 12 if fg == DEF else fg
+            bg = 0 if bg == DEF else bg
+            if fl & F_REV:
+                fg, bg = bg, fg
+            fg_c, bg_c = pal[fg & 15], pal[bg & 15]
+            x0, y0 = x * width, y * height
+            for yy in range(height):
+                for xx in range(width):
+                    px[x0 + xx, y0 + yy] = bg_c
+            c = chars[x]
+            g = glyphs[ord(c)] if ord(c) < len(glyphs) else glyphs[ord('?')]
+            if not any(g) and c != ' ':
+                g = glyphs[ord('?')]
+            for row in range(height):
+                bits = int.from_bytes(g[row * nb:(row + 1) * nb], 'big')
+                for col in range(width):
+                    if bits & (1 << (nb * 8 - 1 - col)):
+                        px[x0 + col, y0 + row] = fg_c
+            if fl & F_UL:
+                for xx in range(width):
+                    px[x0 + xx, y0 + height - 1] = fg_c
+    img.save(path)
+    return path
+
+
 def render(vt, path, font_path=FONT, px=16):
     from PIL import Image, ImageDraw, ImageFont
     font = ImageFont.truetype(font_path, px)
@@ -208,6 +270,7 @@ def main():
     ap.add_argument('--prefix', default='')
     ap.add_argument('--font', default=FONT)
     ap.add_argument('--px', type=int, default=16)
+    ap.add_argument('--psf', default='', help='render with a console PSF font instead of a TTF')
     ap.add_argument('--text', action='store_true', help='also print text dump of each shot')
     ap.add_argument('--home', default=None, help='isolated XDG dirs root')
     a = ap.parse_args()
@@ -283,7 +346,11 @@ def main():
             elif cmd == 'shot':
                 time.sleep(0.25)
                 with r.lock:
-                    p = render(r.vt, os.path.join(a.out, a.prefix + arg + '.png'), a.font, a.px)
+                    out = os.path.join(a.out, a.prefix + arg + '.png')
+                    if a.psf:
+                        p = render_psf(r.vt, out, a.psf)
+                    else:
+                        p = render(r.vt, out, a.font, a.px)
                     if a.text:
                         print('==== %s ====' % arg)
                         print(text_dump(r.vt))

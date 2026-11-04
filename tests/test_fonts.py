@@ -38,6 +38,23 @@ class TestConsoleFonts(unittest.TestCase):
         self.assertEqual(theme.console_font_cell('Lat15-Terminus16.psf.gz'), (8, 16))
         self.assertIsNone(theme.console_font_cell('../nope.psf.gz'))
 
+    def test_psf_screenshot_renderer(self):
+        import tempfile
+        sys.path.insert(0, os.path.join(ROOT, 'tools'))
+        import snap
+        from monocell.vt import VTScreen
+        from PIL import Image
+        w, h, glyphs = snap.load_psf(os.path.join(ROOT, 'monocell', 'fonts', 'Lat15-3270.psf.gz'))
+        self.assertEqual((w, h), (9, 16))
+        self.assertEqual(len(glyphs), 512)
+        vt = VTScreen(10, 2, reply=lambda s: None)
+        vt.feed('\x1b]P4ff0000\x1b[44m  \x1b[0m')
+        out = os.path.join(tempfile.mkdtemp(), 'shot.png')
+        snap.render_psf(vt, out, os.path.join(ROOT, 'monocell', 'fonts', 'Lat15-3270.psf.gz'))
+        im = Image.open(out)
+        self.assertEqual(im.size, (10 * 9, 2 * 16))
+        self.assertEqual(im.getpixel((0, 0)), (255, 0, 0))
+
     def test_console_font_path(self):
         self.assertTrue(theme.console_font_path('Lat15-3270.psf.gz').endswith('Lat15-3270.psf.gz'))
         self.assertIsNone(theme.console_font_path('../etc/passwd'))
