@@ -18,6 +18,7 @@ ACTIONS = {
     113: 'mute',
     114: 'volume-down',
     115: 'volume-up',
+    148: 'thinkvantage',
     224: 'brightness-down',
     225: 'brightness-up',
     243: 'brightness-up',

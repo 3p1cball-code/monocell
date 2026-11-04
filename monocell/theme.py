@@ -2,6 +2,9 @@
 import json
 import os
 import re
+import struct
+
+import gzip
 
 from .screen import A
 from .util import CONFIG_DIR, ensure_dirs, log
@@ -34,6 +37,11 @@ PRESETS = {
                '161616', '202020', '2c2c2c', '424242', 'c4c4c4', 'f2f2f2', '8db86b', 'b8e0a0'],
     'Paper': ['9a9a9a', 'b83a2e', '3f7a2a', '9a6b00', '2f5f9e', '8a3f8a', '237878', '7a7a7a',
               'd6d3cc', 'f2efe8', 'e4e0d6', 'c9c4b8', '2b2b2b', '000000', 'd9600b', 'b04a00'],
+    # IBM Carbon: trackpoint red, phosphor green, IBM blue; dark neutrals.
+    # The deep brand blue stays in slot 4; the accent is Blue 40 so black text
+    # on highlights keeps its contrast (the default on_accent is slot 0).
+    'IBM': ['000000', 'da1e28', '24a148', 'f1c21b', '0f62fe', 'a56eff', '1192e8', '8d8d8d',
+            '161616', '262626', '393939', '525252', 'f4f4f4', 'ffffff', '78a9ff', 'a6c8ff'],
 }
 
 ROLE_DEFAULTS = {
@@ -177,12 +185,125 @@ def clean_on(on, roles=None):
 # a cursor colour per preset, distinct from accent and selection
 PRESET_CURSOR = {
     'Ember': 6, 'Graphite Blue': 5, 'Amber CRT': 13, 'Green Phosphor': 13,
-    'CGA': 5, 'Gruvbox': 6, 'Nord': 4, 'Paper': 5, 'Matrix': 13,
+    'CGA': 5, 'Gruvbox': 6, 'Nord': 4, 'Paper': 5, 'Matrix': 13, 'IBM': 1,
 }
+
+# a console font per preset; saved themes carry their own font in the JSON
+PRESET_FONTS = {name: 'Lat15-Fixed16.psf.gz' for name in PRESETS}
+PRESET_FONTS['IBM'] = 'Lat15-3270.psf.gz'
+
+PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+FONT_DIRS = (
+    os.path.join(PACKAGE_DIR, 'fonts'),
+    '/usr/share/consolefonts',
+    os.path.expanduser('~/.local/share/monocell/fonts'),
+)
+FONT_CHOICES = (
+    ('Fixed 8x16', 'Lat15-Fixed16.psf.gz'),
+    ('Fixed 8x14', 'Lat15-Fixed14.psf.gz'),
+    ('IBM VGA 8x16', 'Lat15-VGA16.psf.gz'),
+    ('IBM VGA 8x14', 'Lat15-VGA14.psf.gz'),
+    ('IBM 3270 9x16', 'Lat15-3270.psf.gz'),
+    ('Terminus 8x16', 'Lat15-Terminus16.psf.gz'),
+    ('Terminus 8x16 bold', 'Lat15-TerminusBold16.psf.gz'),
+    ('Terminus 8x14', 'Lat15-Terminus14.psf.gz'),
+    ('Terminus 10x20', 'Lat15-Terminus20x10.psf.gz'),
+    ('Terminus 12x24', 'Lat15-Terminus24x12.psf.gz'),
+)
+
+
+def font_cell(path):
+    """(width, height) of a PSF1/PSF2 console font (plain or gzip), else None."""
+    try:
+        raw = open(path, 'rb').read()
+        data = gzip.decompress(raw) if path.endswith('.gz') else raw
+    except OSError:
+        return None
+    if data[:2] == b'\x36\x04':
+        return 8, data[3]
+    try:
+        magic, version, hdr, flags, length, charsize, height, width = \
+            struct.unpack('<IIIIIIII', data[:32])
+    except struct.error:
+        return None
+    if magic != 0x864AB572:
+        return None
+    return width, height
+
+
+def console_font_cell(name):
+    """Cell size of a font name in FONT_DIRS: (9, 16) for the 3270 font."""
+    path = console_font_path(name)
+    return font_cell(path) if path else None
+
+
+def console_font_path(name):
+    """Resolve a font name in FONT_DIRS; None for anything that looks like a path."""
+    if not name:
+        return None
+    name = str(name)
+    if name in ('.', '..') or '/' in name or '\\' in name:
+        return None
+    for d in FONT_DIRS:
+        p = os.path.join(d, name)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def apply_console_font(name):
+    """Load the theme font on the current VT (a no-op in a terminal/ssh)."""
+    try:
+        tty = os.ttyname(0)
+    except OSError:
+        return False
+    if not (tty and tty.startswith('/dev/tty') and tty[8:].isdigit()):
+        return False
+    path = console_font_path(name)
+    if not path:
+        return False
+    import shutil
+    import subprocess
+    setfont = shutil.which('setfont')
+    if not setfont:
+        return False
+    try:
+        r = subprocess.run([setfont, path], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return r.returncode == 0
+
+
+def available_fonts():
+    """(label, file name) of the console fonts Monocell can load."""
+    names = set()
+    for directory in FONT_DIRS:
+        try:
+            entries = os.listdir(directory)
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.endswith(('.psf', '.psf.gz')):
+                names.add(entry)
+    out = [(label, name) for label, name in FONT_CHOICES if name in names]
+    known = {name for _, name in FONT_CHOICES}
+    custom = set()
+    for directory in FONT_DIRS[:1] + FONT_DIRS[2:]:
+        try:
+            entries = os.listdir(directory)
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.endswith(('.psf', '.psf.gz')) and entry not in known:
+                custom.add(entry)
+    out.extend((name, name) for name in sorted(custom))
+    return out
 
 DEFAULT_CONFIG = {
     'preset': 'Ember',
     'palette': PRESETS['Ember'],
+    'font': 'Lat15-Fixed16.psf.gz',
     'roles': dict(ROLE_DEFAULTS),
     'layout': [],                 # physical palette order; empty = derived from the roles
     'on': dict(DEFAULT_ON),       # text colour per element {surface role: slot}
@@ -192,7 +313,7 @@ DEFAULT_CONFIG = {
     'clock_seconds': False,
     'clock_24h': True,
     'desktop_logo': False,
-    'media_prompt': True,         # ask before mounting a newly plugged-in medium
+    'media_prompt': False,        # ask before mounting a newly plugged-in medium (off: Files only)
     'wallpaper': '',
     'files_dir': '',              # Files: the folder it was last in
     'background': 'auto',         # auto | logo | plain | image | matrix
@@ -203,6 +324,10 @@ DEFAULT_CONFIG = {
     'ascii_charset': 'full',      # full | simple | shades
     'strict_ascii': False,
     'image_mode': 'blend',        # blend | pixel | ascii | mono
+    'writer_font2': 'graceful',   # FIGlet font for <size2> and H2 (monocell/fonts/figlet)
+    'writer_font3': 'big',        # FIGlet font for <size3> and H1
+    'writer_page_w': 80,          # sheet width in characters (printer: 80 columns)
+    'writer_page_lines': 66,      # sheet length in lines (6 lpi, 11 inch)
     'dither': 'bayer4',           # bayer4 | bayer8 | fs | none
     'video_mode': 'pixel',
     'gfx_look': 'vga',            # graphics mode (Linux console): vga|ega|theme|cga|amber|green
@@ -259,7 +384,7 @@ def theme_slug(name):
 
 
 def saved_themes():
-    """Saved themes as {name: {'palette', 'roles', 'path'}}; broken files are skipped."""
+    """Saved themes as {name: {'palette', 'roles', 'layout', 'on', 'font', 'path'}}; broken files are skipped."""
     out = {}
     try:
         files = sorted(os.listdir(THEME_DIR))
@@ -283,12 +408,14 @@ def saved_themes():
             log('theme %s ignored: %s' % (fn, e))
             continue
         out[str(data.get('name') or fn[:-5])] = {'palette': pal, 'roles': roles,
-                                                 'layout': lay, 'on': on, 'path': path}
+                                                 'layout': lay, 'on': on,
+                                                 'font': str(data.get('font') or ''),
+                                                 'path': path}
     return out
 
 
-def save_theme(name, palette, roles, layout=None, on=None):
-    """Write palette, layout, role map and element text colours (version 4)."""
+def save_theme(name, palette, roles, layout=None, on=None, font=None):
+    """Write palette, layout, role map, text colours and console font (version 4)."""
     name = ' '.join(str(name).split())
     if not name:
         raise ValueError('empty name')
@@ -299,11 +426,15 @@ def save_theme(name, palette, roles, layout=None, on=None):
     lay = list(layout or [])
     if not valid_layout(lay):
         lay = derive_layout(dict(ROLE_DEFAULTS, **roles))
+    font = str(font or '').strip()
+    if '/' in font or '\\' in font:
+        raise ValueError('font must be a file name')
     ensure_dirs()
     os.makedirs(THEME_DIR, exist_ok=True)
     path = os.path.join(THEME_DIR, theme_slug(name) + '.json')
     data = {'version': 4, 'name': name, 'palette': pal, 'layout': lay,
             'roles': roles,
+            'font': font,
             'on': {k: int(v) for k, v in clean_on(on, roles).items()}}
     tmp = path + '.tmp'
     with open(tmp, 'w') as f:
@@ -323,6 +454,10 @@ def delete_theme(name):
     except OSError as e:
         log('theme delete failed: %s' % e)
         return False
+
+
+# keys whose default changed after release; saved copies of the old default are replaced
+DEFAULT_CHANGED = ('media_prompt',)
 
 
 class Config(dict):
@@ -381,6 +516,10 @@ class Config(dict):
             self._loading = True
             try:
                 self.update(data)
+                # defaults that changed: follow the new default unless set by hand
+                for k in DEFAULT_CHANGED:
+                    if k not in self.user_set:
+                        self[k] = json.loads(json.dumps(DEFAULT_CONFIG[k]))
                 self.pop('image_boost', None)
                 self['roles'] = roles
                 if len(self['palette']) != 16:
@@ -396,6 +535,8 @@ class Config(dict):
                         self['roles'] = dict(th['roles'])
                         self['layout'] = th['layout']
                         self['on'] = dict(th['on'])
+                        if th.get('font'):
+                            self['font'] = th['font']
                 if not valid_layout(self['layout']):
                     self['layout'] = derive_layout(self['roles'])
             finally:

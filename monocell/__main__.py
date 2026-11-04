@@ -9,7 +9,7 @@ import traceback
 from . import util
 from .loop import Loop
 from .term import Terminal
-from .theme import Config, Theme
+from .theme import Config, Theme, apply_console_font
 from .wm import WM
 
 
@@ -37,6 +37,9 @@ def main(argv=None):
     util.STRICT_ASCII = cfg['strict_ascii']
     theme = Theme(cfg)
     loop = Loop()
+    # the console font comes from the theme, not from console-setup: load it before
+    # the terminal measures itself (the 3270 font is 9 pixels wide, Fixed is 8)
+    apply_console_font(cfg.get('font'))
     term = Terminal(theme, args.color or cfg.get('color_mode', 'auto'))
     wm = WM(term, loop, cfg, theme)
     last_input = [0.0]

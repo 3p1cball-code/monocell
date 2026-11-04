@@ -689,6 +689,11 @@ class TestThemeLayout(unittest.TestCase):
             lay = theme.derive_layout(theme.ROLE_DEFAULTS)
             self.assertEqual(lay, self.legacy_mapping(theme.LEGACY_DEFAULTS), name)
 
+    def test_preset_fonts_match_presets(self):
+        self.assertEqual(set(theme.PRESET_FONTS), set(theme.PRESETS))
+        self.assertEqual(theme.PRESET_FONTS['IBM'], 'Lat15-3270.psf.gz')
+        self.assertTrue(theme.DEFAULT_CONFIG['font'])
+
     def test_layout_is_a_permutation(self):
         for roles in (theme.ROLE_DEFAULTS,
                       dict(theme.ROLE_DEFAULTS, win=0, title=0, sel=1),
@@ -711,6 +716,19 @@ class TestThemeLayout(unittest.TestCase):
         cfg = Config()
         self.assertTrue(theme.valid_layout(cfg['layout']))
         self.assertEqual(cfg['layout'], theme.derive_layout(cfg['roles']))
+
+    def test_changed_default_replaces_a_saved_old_default(self):
+        import json
+        old = Config.path
+        d = tempfile.mkdtemp()
+        Config.path = os.path.join(d, 'config.json')
+        self.addCleanup(setattr, Config, 'path', old)
+        with open(Config.path, 'w') as f:
+            json.dump({'media_prompt': True, 'user_set': ['font']}, f)
+        self.assertFalse(Config()['media_prompt'])          # old default, not chosen
+        with open(Config.path, 'w') as f:
+            json.dump({'media_prompt': True, 'user_set': ['media_prompt']}, f)
+        self.assertTrue(Config()['media_prompt'])           # set by hand: kept
 
     def test_text_colour_is_keyed_by_element(self):
         roles = dict(theme.ROLE_DEFAULTS)
@@ -790,6 +808,24 @@ class TestThemeFiles(unittest.TestCase):
         data = theme.saved_themes()['With layout']
         self.assertEqual(data['layout'], lay)
         self.assertEqual(data['on'], on)
+
+    def test_theme_file_keeps_font(self):
+        theme.save_theme('With font', theme.PRESETS['Ember'], theme.ROLE_DEFAULTS,
+                         font='Lat15-3270.psf.gz')
+        self.assertEqual(theme.saved_themes()['With font']['font'],
+                         'Lat15-3270.psf.gz')
+        theme.save_theme('No font', theme.PRESETS['Ember'], theme.ROLE_DEFAULTS)
+        self.assertEqual(theme.saved_themes()['No font']['font'], '')
+
+    def test_available_fonts_lists_curated_and_custom(self):
+        old = theme.FONT_DIRS
+        self.addCleanup(setattr, theme, 'FONT_DIRS', old)
+        open(os.path.join(self.dir, 'Lat15-3270.psf.gz'), 'w').close()
+        open(os.path.join(self.dir, 'MyFont.psf'), 'w').close()
+        theme.FONT_DIRS = (self.dir,)
+        names = [name for _, name in theme.available_fonts()]
+        self.assertIn('Lat15-3270.psf.gz', names)
+        self.assertIn('MyFont.psf', names)
 
     def test_v1_file_gets_a_layout(self):
         with open(os.path.join(self.dir, 'old.json'), 'w') as f:

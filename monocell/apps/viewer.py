@@ -138,7 +138,7 @@ class Viewer(App):
             cv.put(ax + 2, ay + 1, 'Loading ' + os.path.basename(self.path or ''), th.c('dim', 'shadow'))
         elif self.img:
             key = (self.path, aw, ah, self.mode, self.dither, self.zoom, tuple(th.rgb),
-                   self.wm.cfg.get('cell_aspect'), self.wm.cfg.get('ascii_charset'))
+                   round(imaging.cell_aspect(self.wm), 3), self.wm.cfg.get('ascii_charset'))
             if key != self.key or not self.cells:
                 self.key = key
                 max_w, max_h = aw, ah

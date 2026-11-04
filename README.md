@@ -19,6 +19,12 @@ Hardware (getestet gegen ein ThinkPad X61s mit 1024×768).
 |---|---|
 | ![Maps im Grafikmodus](screenshots/maps.png) | ![Bild im Grafikmodus](screenshots/viewer-gfx.png) |
 
+**Writer und Login-Screen:**
+
+| | |
+|---|---|
+| ![Writer mit Seite, grosser Schrift und Bild](screenshots/writer.png) | ![Login-Screen](screenshots/login.png) |
+
 *Screenshots aus dem Demo-Home, 120–160 Spalten (die beiden Grafikmodus-Bilder sind
 Abbilder des Framebuffers; das Motiv ist „The Blue Marble", NASA, gemeinfrei). Die
 Fensterrahmen skalieren mit dem Terminal; alles hier ist echte Ausgabe, keine Mockups.*
@@ -167,8 +173,19 @@ monocell-clip --clear
   Fit-Seite/-Breite, Zoom), **Text** zeigt den extrahierten Text (`pdftotext`) zum Lesen,
   Markieren und Kopieren, **ASCII** zeichnet die Seite als ASCII-Art (Tinte als Zeichen auf
   dunklem Grund).
-* **Writer** – Markdown-basierter Wortprozessor, zentrierte Spalte, Fokusmodus,
-  `.docx`/`.odt` importieren, `.docx` exportieren.
+* **Writer** – WYSIWYG-Wortprozessor: die Seite wird beim Schreiben so gezeigt, wie
+  sie gedruckt wird (Blatt 80×66 Zeichen, Rand, `Seite k/N`, Umbruch nur zwischen
+  Zeilen). **Große Schrift** als FIGlet direkt im Text (`S1`/`S2`/`S3`, `Ctrl+G`;
+  Graceful für S2, Big für S3, in den Einstellungen umstellbar), **Unterstreichen**
+  mit `Ctrl+U` (`-`) und `Alt+U`/`U2` (`=`), **Bilder** schweben an einem Absatz und
+  der Text fließt drumherum (ziehen, `#`-Ecke skaliert, `W` wechselt die Umbruchart;
+  Datei-Syntax `![alt](pfad){x=4 dy=1 w=30 wrap=square}`). Cursor, Auswahl und Klicks
+  liegen auf der gerenderten Seite, Auto-Format beim Tippen (`# `, `- `, `1. `, `> `,
+  `---`, ```` ``` ````), Undo/Redo, formatbewahrendes Kopieren. `F5` schaltet auf die
+  Markdown-Quelle; `Ctrl+P` druckt über PPDS für den IBM Proprinter (10 cpi/6 lpi,
+  Seitenvorschub), Bilder als Zeichen mit transparentem Schwarz. `.docx`/`.odt`
+  importieren, `.docx` exportieren. Kein Kursiv – Konsole und Nadeldrucker können es
+  nicht.
 * **Sheets** – Formeln (`=SUM(A1:A5)`, `IF`, `ROUND`, …), CSV/TSV/XLSX/ODS lesen,
   CSV/XLSX/nativ schreiben, Sortieren, Spaltenbreiten.
 * **Rechner** – Ausdrücke, Funktionen, Verlauf (`2^10+sqrt(16)`).
@@ -266,9 +283,24 @@ monocell-clip --clear
 * **System** – Hardware, CPU-Kerne, Speicher, Datenträger, Netz, Batterie (mit
   Restzeit/Ladezeit), Temperatur, **Lüfterdrehzahl**, Prozessliste (SIGTERM/SIGKILL)
   und die eigenen Fenster samt Timern/Threads.
+* **Pi Benchmark** – Machin in reiner Ganzzahl-Arithmetik, ein Prozess pro Kern, prüft
+  Ziffern und Checksumme; Kerntemperaturen und Lüfter als ASCII-Graphen, auf Wunsch als
+  Dauerlauf (5–60 min) mit Zusammenfassung.
+* **Systemtest** – 21 Hardware-Checks (CPU, RAM, SSD, Akku, Netz, Funk, Display, Ton,
+  Sensoren, Tastatur, TrackPoint, …) mit Metriken und Fortschritt; `m` prüft den freien
+  RAM, die ThinkVantage-Taste öffnet ihn.
+* **About** – warum dieses X61s existiert.
 * **Network** – WLAN-Liste mit Signalstärke und Sicherheit, verbinden (maskierter
   Passwort-Dialog), trennen, Radio an/aus und Rescan über NetworkManager (`nmcli`);
   erkennt Captive Portals (`sign-in`) und öffnet sie per `p`/Portal im Browser.
+* **Updates** – Debian-Updates suchen und installieren: Liste ohne root
+  (`apt list --upgradable`), Sicherheitsupdates zuerst, alte → neue Version und die
+  letzte Suche. `Check` erneuert die Paketlisten, `Install all` installiert nach
+  Rückfrage mit Fortschritt und Log – „Install all" erneuert die Listen zuerst, es
+  wird nie ein Paket entfernt, geänderte Konfigurationsdateien bleiben erhalten.
+  Läuft über `/usr/local/sbin/monocell-apt` und eine sudoers-Regel aus
+  `deploy/x61s/install-extras.sh`; ohne die ist die App nur lesend. Meldet, wenn ein
+  Reboot nötig ist.
 * **Einstellungen** – Erscheinungsbild-Editor im Stil von Windows 95/98 (siehe unten),
   Taskleiste, Rahmen, Schatten, Uhr, Hintergrund inkl.
   Background-Reiter mit Regen-Dichte/-Geschwindigkeit/-Zufall, Symbole, Bild-/Video-Modus (inkl.
@@ -276,9 +308,11 @@ monocell-clip --clear
 
 ## Wechselmedien
 
-Steckt ein USB-Stick, eine SD-Karte oder ein Microdrive im PC-Card-Schacht, fragt
-Monocell einmal pro Gerät: **„Removable medium – … – Mount it now?"** mit *Mount* und
-*Not now* (abschaltbar in Einstellungen → Desktop). Gemountet wird über **udisks2**
+Steckt ein USB-Stick, eine SD-Karte oder ein Microdrive im PC-Card-Schacht, taucht
+er im Dateimanager unter **DRIVES** auf: Klick mountet und springt hinein, Rechtsklick
+bietet Mount/Unmount. Der frühere Dialog beim Einstecken ist ab Werk **aus** (er kam bei
+jedem Start); einschalten unter Einstellungen → Desktop → *Ask to mount removable
+media*. Gemountet wird über **udisks2**
 (`udisksctl`): Mountpoint unter `/media/<benutzer>/<LABEL>`, Rechte für vfat/ntfs,
 fstab-Regeln beachtet – das ist derselbe Weg, den eine Desktop-Umgebung nimmt.
 Erkannt wird über `lsblk` (alle 4 s im Hintergrund): alles mit Dateisystem, was
@@ -452,6 +486,13 @@ tty1. tty2/tty3 bleiben normale Shell-Logins (Rettungsweg/SSH). Das Startmenü b
 Beim Beenden von monocell endet die Sitzung und der Login erscheint wieder.
 Ein loginloser Kiosk-Modus ist optional: `install-vt.sh --kiosk`.
 
+**Login-Screen:** `tools/make_issue.py` schreibt `/etc/issue` mit der Theme-Palette
+(OSC), der MONOCELL-Wortmarke in Theme-Farben, Hostname, Debian-Version, Datum/Uhrzeit
+und dem Fingerabdruck-Hinweis, zentriert für die Konsolengröße.
+`sudo deploy/x61s/install-extras.sh --user NAME` installiert ihn (dazu die
+`=`-Reparatur im 3270-Konsolenfont und den Update-Helfer), `--issue-only` erzeugt ihn
+nach einem Theme-Wechsel neu, `--uninstall` baut alles zurück.
+
 ## Auf dem X61s (Kernel-VT)
 
 `deploy/x61s/` installiert monocell als eigenes Konsolen-Frontend (eigener VT, optional
@@ -462,6 +503,12 @@ sudo deploy/x61s/install-vt.sh --user ariedel      # Dienst auf tty2
 # oder vom Arbeitsrechner:
 ./deploy/x61s/deploy-from-workstation.sh ariedel@x61s
 ```
+
+**Zellgröße:** Auf dem Kernel-VT meldet `TIOCGWINSZ` keine Pixelmaße; die Zellhöhe/Breite
+kommt deshalb aus dem geladenen Konsolenfont (Fixed 8×16 → 2,0; IBM 3270 9×16 → 1,78).
+Videos, Bilder, PDF-Seiten und der Desktop-Hintergrund rechnen damit und bleiben
+unverzerrt – ein 4:3-Video füllt im Vollbild ein 4:3-Blatt ohne Ränder. Ein eigener
+Wert lässt sich unter Einstellungen → Images & video setzen (0 = automatisch).
 
 `--no-desktop` stellt auf `multi-user.target` um und deaktiviert den Displaymanager
 (Rollback wird angezeigt). Ein **alternativer GRUB-Eintrag** („MONOCELL - TUI“)
@@ -488,6 +535,8 @@ Details, Maus-/Tastaturhinweise und Deinstallation: `deploy/x61s/README.md`.
 * Video-Ton läuft über eine Pipe mit 250 ms Vorlauf; Pause/Spulen sind dadurch um diesen
   Betrag „weich“, dafür exakt und ohne Dropouts.
 * Kein GPU-Zugriff, keine Bilder als Grafikprotokoll – alles bleibt Text.
+* Der Writer kennt bewusst kein Kursiv: die Linux-Konsole stellt es nicht dar und der
+  IBM Proprinter (PPDS) kann es nicht drucken.
 
 ## Lizenz
 

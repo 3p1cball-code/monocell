@@ -22,7 +22,9 @@ from ..util import fit
 
 RUNGS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
 DEFAULT_DIGITS = 50000  # ~15 s per core on an L7700: long enough for the fan
-HISTORY = 1200          # samples kept, two per second
+LONG_TESTS = [300, 600, 900, 1800, 3600]   # seconds: 5, 10, 15, 30, 60 min
+DEFAULT_LONG = 600
+HISTORY = 7200          # samples kept, two per second (one hour: the longest test)
 KNOWN_HEAD = '31415926535897932384626433832795028841971693993751'
 
 
@@ -45,6 +47,79 @@ def cpu_label():
 
 def human(n):
     return '{:,}'.format(n)
+
+
+def fmt_duration(seconds):
+    seconds = max(0, int(round(seconds)))
+    return '%d:%02d' % divmod(seconds, 60)
+
+
+def next_duration(current):
+    """Next long-test duration, wrapping around."""
+    try:
+        i = LONG_TESTS.index(current)
+    except ValueError:
+        return LONG_TESTS[0]
+    return LONG_TESTS[(i + 1) % len(LONG_TESTS)]
+
+
+class TempStats:
+    """Temperature and fan statistics over a long test.
+
+    `recent_*` keeps the last minute, which is the interesting part once the
+    cooling has settled: the average over the whole run still contains the
+    warm-up, the last minute shows the steady state.
+    """
+    def __init__(self, recent=120):
+        self.temp_n = self.temp_sum = 0
+        self.temp_min = self.temp_max = None
+        self.fan_n = self.fan_sum = 0
+        self.fan_min = self.fan_max = None
+        self.recent_t = deque(maxlen=recent)
+        self.recent_f = deque(maxlen=recent)
+
+    def add(self, temp, fan):
+        if temp is not None:
+            self.temp_n += 1
+            self.temp_sum += temp
+            self.temp_min = temp if self.temp_min is None else min(self.temp_min, temp)
+            self.temp_max = temp if self.temp_max is None else max(self.temp_max, temp)
+            self.recent_t.append(temp)
+        if fan is not None:
+            self.fan_n += 1
+            self.fan_sum += fan
+            self.fan_min = fan if self.fan_min is None else min(self.fan_min, fan)
+            self.fan_max = fan if self.fan_max is None else max(self.fan_max, fan)
+            self.recent_f.append(fan)
+
+    def temp_avg(self):
+        return self.temp_sum / self.temp_n if self.temp_n else None
+
+    def fan_avg(self):
+        return self.fan_sum / self.fan_n if self.fan_n else None
+
+    def recent_temp_avg(self):
+        return sum(self.recent_t) / len(self.recent_t) if self.recent_t else None
+
+
+def long_summary(stats, runs, seconds, reason='done'):
+    """(reason, headline, detail line) for the long-test result."""
+    head = {'done': 'long test done', 'stopped': 'long test stopped',
+            'error': 'long test failed'}.get(reason, 'long test')
+    line1 = '%s %s   %d run%s' % (head, fmt_duration(seconds), len(runs),
+                                  '' if len(runs) == 1 else 's')
+    if stats.temp_n:
+        line1 += '   temp avg %.1f  min %.0f  max %.0f C' % (
+            stats.temp_avg(), stats.temp_min, stats.temp_max)
+    line2 = []
+    recent = stats.recent_temp_avg()
+    if recent is not None:
+        line2.append('last min avg %.1f C' % recent)
+    if stats.fan_n:
+        line2.append('fan avg %d  max %d rpm' % (stats.fan_avg(), stats.fan_max))
+    if len(runs) > 1:
+        line2.append('run %.2f -> %.2f s' % (runs[0], runs[-1]))
+    return reason, line1, '   '.join(line2)
 
 
 class Bench(App):
@@ -72,6 +147,12 @@ class Bench(App):
         self.hist_f = deque(maxlen=HISTORY)
         self.temp = None
         self.fan = None
+        self.long = False                   # a long test is selected/running
+        self.long_secs = DEFAULT_LONG
+        self.long_t0 = 0.0
+        self.long_stats = TempStats()
+        self.long_runs = []
+        self.long_result = None             # (reason, headline, detail) when done
         self.every(0.5, self.sample)
         self.every(0.2, self.poll)
         self.later(0.05, self.sample)
@@ -85,9 +166,15 @@ class Bench(App):
             self.hist_t.append(self.temp)
         if self.fan is not None:
             self.hist_f.append(self.fan)
+        if self.long:
+            self.long_stats.add(self.temp, self.fan)
         self.invalidate()
 
     def reset(self):
+        if self.long:
+            self.stop(quiet=True)
+            self.long = False
+        self.long_result = None
         self.hist_t.clear()
         self.hist_f.clear()
         self.runs = []
@@ -97,8 +184,18 @@ class Bench(App):
         self.sample()
 
     # ---------------------------------------------------------------- workers
-    def start(self):
+    def start(self, long=False):
         self.stop(quiet=True)
+        self.long = bool(long)
+        self.long_result = None
+        self.result = ''
+        if self.long:
+            self.long_t0 = time.monotonic()
+            self.long_stats = TempStats()
+            self.long_runs = []
+        self._launch()
+
+    def _launch(self):
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         env = dict(os.environ)
         env['PYTHONPATH'] = root + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
@@ -110,18 +207,22 @@ class Bench(App):
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
             except OSError as e:
                 self.error = str(e)
-                self.stop(quiet=True)
+                if self.long:
+                    self._end_long('error')
+                else:
+                    self.stop(quiet=True)
                 return
             self.workers.append({'proc': proc, 'secs': None, 'sum': None, 'head': None})
         self.running = True
         self.error = ''
-        self.result = ''
+        if not self.long:
+            self.result = ''
         self.elapsed = 0.0
         self.t0 = time.monotonic()
         self.sample()
         self.invalidate()
 
-    def stop(self, quiet=False):
+    def _kill(self):
         for wk in self.workers:
             proc = wk.get('proc')
             if proc and proc.poll() is None:
@@ -131,12 +232,30 @@ class Bench(App):
                 except (OSError, subprocess.TimeoutExpired):
                     pass
         self.workers = []
+
+    def stop(self, quiet=False):
+        self._kill()
         self.running = False
-        if not quiet:
+        if self.long and not quiet:
+            self._end_long('stopped')
+        elif not quiet:
             self.invalidate()
+
+    def _end_long(self, reason):
+        self._kill()
+        self.running = False
+        seconds = time.monotonic() - self.long_t0 if self.long_t0 else 0.0
+        if reason == 'done':
+            seconds = min(seconds, self.long_secs)
+        self.long_result = long_summary(self.long_stats, self.long_runs, seconds, reason)
+        self.long = False
+        self.invalidate()
 
     def poll(self):
         if not self.running:
+            return
+        if self.long and time.monotonic() - self.long_t0 >= self.long_secs:
+            self._end_long('done')
             return
         done = 0
         for wk in self.workers:
@@ -179,8 +298,27 @@ class Bench(App):
             self.error = ''
             self.runs.append((self.digits, self.cores, self.elapsed))
             self.runs = self.runs[-8:]
-        self.stop(quiet=True)
+        if self.long:
+            if not self.error:
+                self.long_runs.append(self.elapsed)
+            self.stop(quiet=True)
+            if self.error:
+                self._end_long('error')
+            elif time.monotonic() - self.long_t0 >= self.long_secs:
+                self._end_long('done')
+            else:
+                self.later(0.2, self._next_long)
+        else:
+            self.stop(quiet=True)
         self.invalidate()
+
+    def _next_long(self):
+        if not self.long or self.win.closed:
+            return
+        if time.monotonic() - self.long_t0 >= self.long_secs:
+            self._end_long('done')
+            return
+        self._launch()
 
     # ---------------------------------------------------------------- helpers
     def rate(self):
@@ -195,10 +333,16 @@ class Bench(App):
         return self.rate() * self.cores
 
     def step(self, direction):
-        if self.running:
+        if self.running or self.long:
             return
         i = RUNGS.index(self.digits) if self.digits in RUNGS else len(RUNGS) - 2
         self.digits = RUNGS[max(0, min(len(RUNGS) - 1, i + direction))]
+        self.invalidate()
+
+    def cycle_duration(self):
+        if self.running or self.long:
+            return
+        self.long_secs = next_duration(self.long_secs)
         self.invalidate()
 
     # ---------------------------------------------------------------- drawing
@@ -226,11 +370,13 @@ class Bench(App):
             if refs:
                 state += '   ~%d%%' % min(99, int(100 * elapsed / max(refs)))
             self.kv(cv, y, w, 'state', state, 'accent')
+        elif self.long:
+            self.kv(cv, y, w, 'state', 'long test restarting...', 'accent')
         else:
             state = 'idle, press s to start' if not self.elapsed else 'done in %.2f s' % self.elapsed
             self.kv(cv, y, w, 'state', state, 'dim')
         y += 1
-        if self.running:
+        if self.running or self.long:
             speed = 'measuring...'
         else:
             speed = '%.2f kdigit/s total   %.2f per core' % (self.total_rate() / 1000.0,
@@ -248,28 +394,75 @@ class Bench(App):
         else:
             self.kv(cv, y, w, 'result', 'no run yet -- results are checked against pi', 'dim')
         y += 1
-        parts = []
-        if self.cores_t:
-            if len(self.cores_t) <= 3:
-                parts.append('  '.join('%s %.0f C' % (n, v) for n, v in self.cores_t))
-            else:
-                parts.append('max %.0f C (%d cores)' % (self.temp or 0, len(self.cores_t)))
-        elif self.temp is not None:
-            parts.append('%.0f C' % self.temp)
-        if self.fan is not None:
-            parts.append('%d rpm' % self.fan)
-        self.kv(cv, y, w, 'sensors', '   '.join(parts) if parts else 'no sensors found',
-                'text' if parts else 'dim')
+        self.draw_sensors(cv, y, w)
         y += 1
+        y = self.draw_long(cv, y, w)
 
         avail = h - y - 1
         ph = min(14, max(0, (avail - 2) // 2))
         if ph >= 4:
-            y = self.panel(cv, y, w, ph, 'TEMPERATURE (hottest core)', self.hist_t, 'C', 'accent', 6)
+            y = self.panel(cv, y, w, ph, 'TEMPERATURE (hottest core)', self.hist_t, 'C', 'accent', 6,
+                           color=hardware.temp_role)
             y = self.panel(cv, y, w, ph, 'FAN', self.hist_f, 'rpm', 'accent2', 300)
         self.hints(cv, h - 1, w)
 
-    def panel(self, cv, y, w, ph, label, hist, unit, role, min_span):
+    def draw_sensors(self, cv, y, w):
+        th = self.th
+        x = 11
+        cv.put(0, y, 'sensors', th.c('dim', 'win'))
+
+        def put(text, role):
+            nonlocal x
+            if x >= w:
+                return
+            text = text[:max(0, w - x)]
+            cv.put(x, y, text, th.c(role, 'win'))
+            x += len(text)
+
+        if self.cores_t:
+            if len(self.cores_t) <= 3:
+                for i, (name, value) in enumerate(self.cores_t):
+                    if i:
+                        put('  ', 'text')
+                    put('%s ' % name, 'text')
+                    put('%.0f' % value, hardware.temp_role(value) or 'text')
+                    put(' C', 'text')
+            else:
+                hottest = self.temp if self.temp is not None else max(v for _, v in self.cores_t)
+                put('max ', 'text')
+                put('%.0f' % hottest, hardware.temp_role(hottest) or 'text')
+                put(' C (%d cores)' % len(self.cores_t), 'text')
+        elif self.temp is not None:
+            put('%.0f' % self.temp, hardware.temp_role(self.temp) or 'text')
+            put(' C', 'text')
+        else:
+            put('no sensors found', 'dim')
+        if self.fan is not None:
+            put('   %d rpm' % self.fan, 'text')
+
+    def draw_long(self, cv, y, w):
+        th = self.th
+        if self.long:
+            elapsed = min(time.monotonic() - self.long_t0, self.long_secs)
+            st = self.long_stats
+            head = 'long %s / %s   run %d' % (fmt_duration(elapsed), fmt_duration(self.long_secs),
+                                              len(self.long_runs) + 1)
+            if st.temp_n:
+                head += '   temp avg %.1f  max %.0f C' % (st.temp_avg(), st.temp_max)
+            cv.put(0, y, fit(head, w), th.c('accent', 'win'))
+            return y + 1
+        if not self.long_result:
+            return y
+        reason, line1, line2 = self.long_result
+        role = {'done': 'green', 'stopped': 'yellow', 'error': 'red'}.get(reason, 'accent')
+        cv.put(0, y, fit(line1, w), th.c(role, 'win'))
+        y += 1
+        if line2:
+            cv.put(0, y, fit(line2, w), th.c('dim', 'win'))
+            y += 1
+        return y
+
+    def panel(self, cv, y, w, ph, label, hist, unit, role, min_span, color=None):
         th = self.th
         lo, hi = self.scale(hist, min_span)
         vals = list(hist)[-300:]
@@ -295,11 +488,14 @@ class Bench(App):
             for i, v in enumerate(pts):
                 frac = 0.0 if hi <= lo else (v - lo) / float(hi - lo)
                 r = max(0, min(inner_h - 1, int(round(frac * (inner_h - 1)))))
+                cell_role = color(v) if color else role
+                if cell_role is None:
+                    cell_role = role
                 col = gx + 1 + off + i
                 if prev is not None and prev != r:
                     for mid_r in range(min(prev, r) + 1, max(prev, r)):
-                        cv.putc(col, y + ph - 1 - mid_r, '|', th.c(role, 'win'))
-                cv.putc(col, y + ph - 1 - r, '#', th.c(role, 'win'))
+                        cv.putc(col, y + ph - 1 - mid_r, '|', th.c(cell_role, 'win'))
+                cv.putc(col, y + ph - 1 - r, '#', th.c(cell_role, 'win'))
                 prev = r
         return y + ph + 1
 
@@ -330,7 +526,8 @@ class Bench(App):
 
     def hints(self, cv, y, w):
         th = self.th
-        items = [('[s]', 'start'), ('[x]', 'stop'), ('[-/+]', 'digits'), ('[r]', 'reset')]
+        items = [('[s]', 'start'), ('[l]', '%d min' % (self.long_secs // 60)), ('[x]', 'stop'),
+                 ('[-/+]', 'digits'), ('[t]', 'duration'), ('[r]', 'reset')]
         x = 0
         for key, label in items:
             self.zone(x, y, len(key), 1, key)
@@ -341,28 +538,38 @@ class Bench(App):
 
     def on_click(self, key, ev):
         if key == '[s]':
-            if not self.running:
+            if not self.running and not self.long:
                 self.start()
+        elif key == '[l]':
+            if not self.running and not self.long:
+                self.start(long=True)
         elif key == '[x]':
-            if self.running:
+            if self.running or self.long:
                 self.stop()
         elif key == '[-/+]':
             self.step(1)
+        elif key == '[t]':
+            self.cycle_duration()
         elif key == '[r]':
             self.reset()
 
     def on_key(self, ev):
         k = ev.key
         if k in ('s', 'enter'):
-            if not self.running:
+            if not self.running and not self.long:
                 self.start()
+        elif k == 'l':
+            if not self.running and not self.long:
+                self.start(long=True)
         elif k in ('x', 'space'):
-            if self.running:
+            if self.running or self.long:
                 self.stop()
         elif k in ('+', '=', 'right'):
             self.step(1)
         elif k in ('-', '_', 'left'):
             self.step(-1)
+        elif k == 't':
+            self.cycle_duration()
         elif k == 'r':
             self.reset()
         else:

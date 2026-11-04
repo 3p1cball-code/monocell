@@ -302,10 +302,10 @@ class System(App):
         else:
             self.draw_tw(body)
 
-    def kv(self, cv, x, y, k, v, w):
+    def kv(self, cv, x, y, k, v, w, role='bright'):
         th = self.th
         cv.put(x, y, k, th.c('dim', 'win'))
-        cv.put(x + 10, y, fit(v, max(1, w - 10)), th.c('bright', 'win'))
+        cv.put(x + 10, y, fit(v, max(1, w - 10)), th.c(role, 'win'))
 
     def draw_overview(self, cv):
         th = self.th
@@ -318,21 +318,26 @@ class System(App):
                 ('CPU', '%s x%d' % (s['cpu'], s['cores'])), ('Uptime', uptime()),
                 ('Terminal', '%dx%d  %s' % (self.wm.w, self.wm.h, self.wm.term.mode))]
         cores = hardware.cpu_cores()
+        temp_level = None
         if cores:
+            hottest = max(v for _, v in cores)
+            temp_level = hardware.temp_role(hottest)
             if len(cores) <= 2:
                 text = '  '.join('%s %.0f C' % (n, v) for n, v in cores)
             else:
-                text = 'max %.0f C  (%d cores)' % (max(v for _, v in cores), len(cores))
+                text = 'max %.0f C  (%d cores)' % (hottest, len(cores))
             rows.append(('Temp', text))
         else:
             t = hardware.cpu_temp()
             if t is not None:
+                temp_level = hardware.temp_role(t)
                 rows.append(('Temp', '%.0f C' % t))
         fans_ = self.slow.get('fans') or []
         if fans_:
             rows.append(('Fan', ' / '.join('%d' % v for v in fans_) + ' rpm'))
         for k, v in rows:
-            self.kv(cv, 0, y, k, v, lw)
+            role = temp_level if k == 'Temp' and temp_level else 'bright'
+            self.kv(cv, 0, y, k, v, lw, role)
             y += 1
         for name, ip in self.slow.get('ips', [])[:3]:
             self.kv(cv, 0, y, name[:9], ip, lw)

@@ -162,11 +162,14 @@ REGISTRY = [
     ('jump', 'jump', 'Jump', '[J]', 'Tiny platformer', 'Games'),
     ('system', 'system', 'System', '[i]', 'System monitor', 'System'),
     ('bench', 'bench', 'Pi Benchmark', '[%]', 'CPU load with temp & fan graphs', 'System'),
+    ('selftest', 'selftest', 'Systemtest', '[!]', 'Alle Hardware erkennen und prüfen', 'System'),
     ('network', 'network', 'Network', ')))', 'Wi-Fi networks & signal', 'System'),
+    ('updates', 'updates', 'Updates', '[u]', 'Look for and install Debian updates', 'System'),
     ('kdeconnect', 'kdeconnect', 'KDE Connect', '[K]', 'Clipboard & file transfer', 'System'),
     ('settings', 'settings', 'Settings', '{o}', 'Settings', 'System'),
     ('opencode', 'opencode', 'opencode', '[O]', 'Agent TUI in a terminal', 'Tools'),
     ('tailscale', 'tailscale', 'Tailscale', '[T]', 'Tailnet status & connect', 'Tools'),
+    ('about', 'about', 'About', '[?]', 'Warum dieses X61s existiert', 'About'),
 ]
 
 

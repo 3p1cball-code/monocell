@@ -1,7 +1,8 @@
 """Settings: appearance editor (palette + element colours), desktop/media/web/calendar options."""
 from ..app import App
-from .. import gcal
-from ..theme import PRESETS, delete_theme, save_theme, saved_themes
+from .. import figlet, gcal
+from ..theme import (PRESETS, PRESET_FONTS, available_fonts, delete_theme,
+                     save_theme, saved_themes)
 from ..util import fit
 from ..widgets import MenuItem, TextField, button
 from .appearance import AppearanceMixin
@@ -10,6 +11,8 @@ SECTIONS = [('colors', 'Appearance'), ('desktop', 'Desktop'), ('background', 'Ba
             ('media', 'Images & video'), ('maps', 'Maps'), ('web', 'Web'),
             ('calendar', 'Calendar'), ('tools', 'Tools'),
             ('about', 'About')]
+
+FIGLET_FONTS = figlet.available() or ['graceful']
 
 OPTIONS = {
     'desktop': [
@@ -69,6 +72,11 @@ OPTIONS = {
         ('opencode_workdir', 'Working directory (empty = home)', 'text'),
         ('kdeconnect_display', 'KDE Connect headless X display', 'text'),
         ('shot_dir', 'Text screenshot folder', 'text'),
+        ('printer_device', 'Printer device or CUPS queue (empty = print to file)', 'text'),
+        ('writer_font2', 'Writer big text (S2, H2)', FIGLET_FONTS),
+        ('writer_font3', 'Writer huge text (S3, H1)', FIGLET_FONTS),
+        ('writer_page_w', 'Writer page width in characters', [64, 72, 80, 88, 96]),
+        ('writer_page_lines', 'Writer page length in lines', [60, 66, 72, 84]),
     ],
 }
 
@@ -126,6 +134,7 @@ class Settings(AppearanceMixin, App):
         if name in PRESETS:
             self.cfg['palette'] = list(PRESETS[name])
             self.cfg['preset'] = name
+            self.cfg['font'] = PRESET_FONTS.get(name, self.cfg.get('font', ''))
             if name == 'Matrix':
                 self.cfg['background'] = 'matrix'
             elif self.cfg.get('background') == 'matrix':
@@ -139,6 +148,8 @@ class Settings(AppearanceMixin, App):
             self.cfg['roles'] = dict(data['roles'])
             self.cfg['layout'] = list(data['layout'])
             self.cfg['on'] = dict(data['on'])
+            if data.get('font'):
+                self.cfg['font'] = data['font']
             self.cfg['preset'] = name
         self.apply()
         self.sync_hex()
@@ -154,12 +165,35 @@ class Settings(AppearanceMixin, App):
             items += [MenuItem(name, (lambda n=name: self.load_preset(n)), checked=cur == name)
                       for name in sorted(self.saved)]
         items.append(None)
+        items.append(MenuItem('Font: %s' % (self.cfg.get('font') or 'Standard'),
+                              self.font_menu))
         items.append(MenuItem('Save current as...', self.save_theme_dialog))
         items.append(MenuItem('Delete "%s"' % cur, self.delete_theme_dialog,
                               enabled=cur in self.saved))
         items.append(MenuItem('Reset element colours', self.reset_elements))
         x, y = self.theme_pos
         self.wm.menu(items, self.win.x + 1 + self.body_x + x, self.win.y + 2 + y, title='Themes')
+
+    def font_menu(self):
+        cur = self.cfg.get('font', '')
+        items = [MenuItem(label, (lambda n=name: self.load_font(n)),
+                          checked=cur == name)
+                 for label, name in available_fonts()]
+        items.append(None)
+        preset = self.cfg.get('preset')
+        if preset in PRESET_FONTS:
+            items.append(MenuItem(
+                'Preset default (%s)' % PRESET_FONTS[preset],
+                lambda: self.load_font(PRESET_FONTS[preset])))
+        items.append(MenuItem('No font change', lambda: self.load_font('')))
+        x, y = getattr(self, 'font_pos', self.theme_pos)
+        self.wm.menu(items, self.win.x + 1 + self.body_x + x,
+                     self.win.y + 2 + y, title='Font')
+
+    def load_font(self, name):
+        self.cfg['font'] = name or ''
+        self.apply()
+        self.wm.toast('Font: %s' % (name or 'unverändert'))
 
     def save_theme_dialog(self):
         cur = self.current_theme()
@@ -182,7 +216,8 @@ class Settings(AppearanceMixin, App):
     def write_theme(self, name):
         try:
             name = save_theme(name, self.cfg['palette'], self.th.r,
-                              layout=self.th.layout, on=self.th.on)
+                              layout=self.th.layout, on=self.th.on,
+                              font=self.cfg.get('font', ''))
         except (OSError, ValueError) as e:
             self.wm.toast('Theme not saved: %s' % e, 'red')
             return
@@ -405,6 +440,8 @@ class Settings(AppearanceMixin, App):
             self.opt_sel = 0
         elif key[0] == 'theme':
             self.theme_action(key[1])
+        elif key[0] == 'font':
+            self.font_menu()
         elif self.section == 'colors' and self.appearance_click(key, ev):
             pass
         elif key[0] == 'opt':

@@ -424,7 +424,7 @@ class AppearanceMixin:
                 x += button(self, cv, x, 0, 'Save as...', ('theme', 'save')) + 1
             if x + 8 < w:
                 button(self, cv, x, 0, 'Delete', ('theme', 'del'), enabled=cur in self.saved)
-        ph = min(PREVIEW_MAX, h - 2 - CTRL_ROWS)
+        ph = min(PREVIEW_MAX, h - 3 - CTRL_ROWS)
         if ph >= 7:
             self.pv_rect = (0, 1, w, ph)
             y = 2 + ph
@@ -433,6 +433,15 @@ class AppearanceMixin:
             cv.put(0, 1, fit('(enlarge the window for the preview)', w), th.c('dim', 'win'))
             y = 2
         self.draw_controls(cv, y, focused)
+        self.draw_font_row(cv, cv.h - 1)
+
+    def draw_font_row(self, cv, y):
+        th = self.th
+        label = self.cfg.get('font') or 'Standard'
+        cv.put(0, y, 'Font', th.c('dim', 'win'))
+        self.font_pos = (6, y)
+        button(self, cv, 6, y, fit(label, max(8, cv.w - 7)) + ' v',
+               ('font', 'menu'))
 
     def draw_controls(self, cv, y, focused):
         th = self.th

@@ -180,6 +180,9 @@ class StartMenu:
         cv.fill(x, y, w, h, th.c('text', 'menu'))
         cv.fill(x, y, 1, h, th.c('text', 'accent'))
         cv.put(x + 2, y + 1, fit('monocell', 12), th.c('accent', 'menu', 1))
+        host = fit(getattr(self.wm, 'hostname', '') or '', max(0, w - 16), align='right')
+        if host:
+            cv.put(x + w - 1 - len(host), y + 1, host, th.c('dim', 'menu'))
         self.search.draw(cv, x + 2, y + 2, w - 3, th, True, bg='field')
         for i in range(self.avail):
             idx = self.top + i
@@ -579,7 +582,7 @@ class WM:
         self.media_seen = set(by_dev)
         self.media_new = {d for d in self.media_new
                           if d in by_dev and not by_dev[d]['mount']}
-        if not self.media_new or not self.cfg.get('media_prompt', True):
+        if not self.media_new or not self.cfg.get('media_prompt', False):
             return
         if any(w.modal_for for w in self.windows):
             return                          # ask again next round, not on top of a dialog
@@ -1165,7 +1168,7 @@ class WM:
         w, h = self.w, self.desk_h
         key = (path, w, h, tuple(self.theme.rgb), self.background_mode(),
                self.cfg.get('image_mode'), self.cfg.get('dither'),
-               self.cfg.get('ascii_charset'), self.cfg.get('cell_aspect'))
+               self.cfg.get('ascii_charset'), round(imaging.cell_aspect(self), 3))
         if key == self.wp_key:
             return
         self.wp_key = key
@@ -1208,6 +1211,7 @@ class WM:
         from . import util
         util.STRICT_ASCII = self.cfg['strict_ascii']
         self.sync_symbols()
+        self.apply_font(self.cfg.get('font'))
         self.rain = None
         for w in self.windows:
             if w.app:
@@ -1218,6 +1222,59 @@ class WM:
         self.layout()
         self.load_wallpaper()
         self.dirty = True
+
+    def apply_font(self, name=None):
+        """Load the theme's console font on the current VT; a no-op elsewhere."""
+        if not name:
+            return
+        name = str(name)
+        if name in ('.', '..') or '/' in name or '\\' in name:
+            return
+        if name == getattr(self, '_font_current', None):
+            return
+        try:
+            tty = os.ttyname(0)
+        except OSError:
+            return
+        if not (tty and tty.startswith('/dev/tty') and tty[8:].isdigit()):
+            return
+        from .theme import FONT_DIRS
+        path = None
+        for d in FONT_DIRS:
+            p = os.path.join(d, name)
+            if os.path.exists(p):
+                path = p
+                break
+        if not path:
+            from . import util
+            util.log('theme font not found: ' + name)
+            return
+        import shutil
+        import subprocess
+        setfont = shutil.which('setfont')
+        if not setfont:
+            return
+        try:
+            r = subprocess.run([setfont, path],
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        except OSError as e:
+            from . import util
+            util.log('theme font: %s' % e)
+            return
+        if r.returncode == 0:
+            from .theme import console_font_cell
+            cell = console_font_cell(name)
+            if cell:
+                self.term.cell_aspect = cell[1] / cell[0]
+        if r.returncode:
+            if not getattr(self, '_font_warned', False):
+                from . import util
+                util.log('theme font: setfont exited %d '
+                         '(CAP_SYS_TTY_CONFIG?)' % r.returncode)
+                self._font_warned = True
+            return
+        self._font_current = name
 
     def if_ip(self, name):
         try:
@@ -1467,6 +1524,8 @@ class WM:
             self.open('files')
         elif action == 'startmenu':
             self.toggle_start()
+        elif action == 'thinkvantage':
+            self.open('selftest')
 
     def open_panel(self, kind, anchor=None):
         for p in list(self.popups):

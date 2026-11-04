@@ -285,6 +285,26 @@ def cpu_temp():
     return best
 
 
+# Merom (L7700) thermal limits: Tjunction max is 100 C, the CPU throttles in
+# the low 90s, and Lenovo recommends staying below 80 C. A healthy X61s sits
+# around 46-50 C idle and 53-55 C at full load with the fan near 4400 rpm
+# (measured 2026-11-04). So <80 is normal, 80-89 is high, >=90 is critical.
+TEMP_HIGH = 80
+TEMP_CRITICAL = 90
+
+
+def temp_role(celsius):
+    """Theme role for a core temperature: green normal, yellow high, red critical."""
+    if celsius is None:
+        return None
+    value = int(round(celsius))
+    if value >= TEMP_CRITICAL:
+        return 'red'
+    if value >= TEMP_HIGH:
+        return 'yellow'
+    return 'green'
+
+
 def fan_rpm():
     """Current fan speed in rpm, or None."""
     m = re.search(r'speed:\s*(\d+)', _read('/proc/acpi/ibm/fan'))

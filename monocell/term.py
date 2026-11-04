@@ -395,15 +395,36 @@ class Terminal:
         return frozenset(vt_state_mods(self.vt_shift_state())) if self.on_vt else frozenset()
 
     # ---------- setup ----------
+    def use_font_aspect(self):
+        a = self.font_cell_aspect()
+        if a:
+            self.cell_aspect = a
+        return self.cell_aspect
+
+    def font_cell_aspect(self):
+        """Cell height/width from the console font; the VT reports no pixel size."""
+        try:
+            from .theme import console_font_cell
+            cell = console_font_cell(self.theme.cfg.get('font'))
+        except Exception:
+            return None
+        return (cell[1] / cell[0]) if cell else None
+
     def query_size(self):
+        pixels = False
         try:
             rows, cols, xp, yp = struct.unpack('HHHH', fcntl.ioctl(self.fd_out, termios.TIOCGWINSZ, b'\0' * 8))
             if xp and yp and cols and rows:
                 self.cell_aspect = (yp / rows) / (xp / cols)
+                pixels = True
             if cols and rows:
+                if not pixels and self.mode == 'linux':
+                    self.use_font_aspect()
                 return cols, rows
         except OSError:
             pass
+        if self.mode == 'linux':
+            self.use_font_aspect()
         try:
             s = os.get_terminal_size(self.fd_out)
             return s.columns, s.lines
@@ -510,6 +531,8 @@ class Terminal:
             s = '\x1b[0;38;2;%d;%d;%d;48;2;%d;%d;%d' % (r, g, b, R, G, B)
             if fl & 2:
                 s += ';4'
+            if fl & 4:
+                s += ';3'
             if fl & 1:
                 s += ';1'
             s += 'm'
@@ -518,8 +541,9 @@ class Terminal:
             pb = self.perm[self.bgmap[bg]]
             s = '\x1b[0;%s3%d;4%dm' % ('1;' if pf >= 8 else '', pf & 7, pb & 7)
         else:
-            s = '\x1b[0;%d;%d%s%sm' % (30 + fg if fg < 8 else 82 + fg, 40 + bg if bg < 8 else 92 + bg,
-                                       ';4' if fl & 2 else '', ';1' if fl & 1 else '')
+            s = '\x1b[0;%d;%d%s%s%sm' % (30 + fg if fg < 8 else 82 + fg, 40 + bg if bg < 8 else 92 + bg,
+                                         ';4' if fl & 2 else '', ';3' if fl & 4 else '',
+                                         ';1' if fl & 1 else '')
         self.sgr_cache[a] = s
         return s
 

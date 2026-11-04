@@ -1,0 +1,31 @@
+#!/bin/sh
+# monocell-apt - the only root actions the Monocell "Updates" app may run.
+#
+# Installed as /usr/local/sbin/monocell-apt (root:root 0755) by install-extras.sh,
+# allowed for one user via /etc/sudoers.d/monocell-apt with exactly these
+# arguments, so the app can use `sudo -n` without a password prompt on the VT.
+#
+#   monocell-apt update    refresh the package lists (apt-get update)
+#   monocell-apt upgrade   install all upgrades, never remove packages
+#                          (apt-get upgrade --with-new-pkgs: new kernels come in,
+#                          changed config files keep the local version)
+set -eu
+export DEBIAN_FRONTEND=noninteractive
+export LC_ALL=C.UTF-8
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+case "${1:-}" in
+    update)
+        exec apt-get update
+        ;;
+    upgrade)
+        exec apt-get -y \
+            -o Dpkg::Options::=--force-confdef \
+            -o Dpkg::Options::=--force-confold \
+            -o Dpkg::Use-Pty=0 \
+            --with-new-pkgs upgrade
+        ;;
+    *)
+        echo "usage: monocell-apt update|upgrade" >&2
+        exit 2
+        ;;
+esac

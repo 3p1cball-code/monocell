@@ -9,6 +9,7 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
 
 from ..app import App
+from .. import charts
 from ..formula import FormulaError, col_index, col_name, evaluate, fmt_number
 from ..util import fit, shorten_path
 from ..widgets import TextField, button
@@ -218,6 +219,8 @@ class Sheet(App):
         self.resize_col = None
         self.vis_rows = 20
         self.grid_w = 80
+        self.chart = False
+        self.chart_type = 'bars'
         if path:
             self.load(path)
         else:
@@ -442,13 +445,64 @@ class Sheet(App):
         self.modified = True
         self.update_title()
 
+    # ------------------------------------------------------------ chart
+    def toggle_chart(self):
+        if self.edit is not None:
+            self.commit()
+        self.chart = not self.chart
+        self.invalidate()
+
+    def draw_role_rows(self, cv, x, y, rows):
+        th = self.th
+        for i, (chars, roles) in enumerate(rows):
+            yy = y + i
+            if yy >= cv.h:
+                break
+            cv.put(x, yy, chars, th.c('text', 'win'))
+            start = 0
+            for j in range(1, len(chars) + 1):
+                if j == len(chars) or roles[j] != roles[start]:
+                    cv.set_attr(x + start, yy, j - start, 1, th.c(roles[start], 'win'))
+                    start = j
+
+    def draw_chart(self, cv, focused):
+        th = self.th
+        w, h = cv.w, cv.h
+        x = 0
+        for label, key in (('Grid', 'grid'), ('Bars', 'bars'), ('Line', 'line'),
+                           ('Save', 'save'), ('Open', 'open')):
+            if x + len(label) + 3 > w:
+                break
+            x += button(self, cv, x, 0, label, key, active=(key == self.chart_type)) + 1
+        r0, c0, r1, c1 = self.sel_rect()
+        data = charts.extract(self.m, r0, c0, r1, c1, self.c)
+        if data is None:
+            cv.put(0, 2, fit('No numbers in the selection - mark a numeric range '
+                             'or put the cursor in a number column', w), th.c('dim', 'win'))
+            cv.put(0, h - 1, fit('Esc/F4  grid', w), th.c('dim', 'win'))
+            return
+        title = 'GRAPH  %s  %s  %d values' % (self.chart_type.title(), data.title,
+                                             len(data.values))
+        cv.put(0, 2, fit(title, w), th.c('accent', 'win', 1))
+        body_h = max(0, h - 4)
+        rows = (charts.line_chart(data, w, body_h) if self.chart_type == 'line'
+                else charts.bars_chart(data, w, body_h))
+        self.draw_role_rows(cv, 0, 3, rows)
+        st = '%s%d:%s%d  min %s  max %s   b bars  l line  Esc grid' % (
+            col_name(data.col), data.r0 + 1, col_name(data.col), data.r1 + 1,
+            fmt_number(min(data.values)), fmt_number(max(data.values)))
+        cv.put(0, h - 1, fit(st, w), th.c('dim', 'win'))
+
     # ------------------------------------------------------------ draw
     def draw(self, cv, focused):
+        if self.chart:
+            self.draw_chart(cv, focused)
+            return
         th = self.th
         w, h = cv.w, cv.h
         x = 0
         for label, key in (('New', 'new'), ('Open', 'open'), ('Save', 'save'), ('Save as', 'saveas'),
-                           ('Sum', 'sum'), ('Sort', 'sort'), ('Undo', 'undo')):
+                           ('Sum', 'sum'), ('Sort', 'sort'), ('Graph', 'graph'), ('Undo', 'undo')):
             if x + len(label) + 3 > w:
                 break
             x += button(self, cv, x, 0, label, key) + 1
@@ -546,6 +600,14 @@ class Sheet(App):
                 self.start_edit('=SUM(')
         elif key == 'sort':
             self.sort_col()
+        elif key == 'graph':
+            self.toggle_chart()
+        elif key == 'grid':
+            self.chart = False
+            self.invalidate()
+        elif key in ('bars', 'line'):
+            self.chart_type = key
+            self.invalidate()
         elif key == 'fbar':
             if self.edit is None:
                 self.start_edit()
@@ -590,6 +652,10 @@ class Sheet(App):
         return None
 
     def on_mouse(self, ev):
+        if self.chart:
+            if ev.y >= 3 or ev.kind in ('wheelup', 'wheeldown'):
+                return True
+            return super().on_mouse(ev)
         if self.resize_col is not None:
             c, sx, w0 = self.resize_col
             if ev.kind == 'drag':
@@ -635,6 +701,19 @@ class Sheet(App):
 
     def on_key(self, ev):
         k = ev.key
+        if self.chart:
+            if k in ('esc', 'f4'):
+                self.chart = False
+            elif k == 'b':
+                self.chart_type = 'bars'
+            elif k == 'l':
+                self.chart_type = 'line'
+            elif k == 'ctrl+s':
+                self.save()
+            elif k == 'ctrl+o':
+                self.on_click('open', None)
+            self.invalidate()
+            return True
         if self.edit is not None:
             if k == 'esc':
                 self.edit = None
@@ -668,6 +747,8 @@ class Sheet(App):
             self.ensure()
         elif k in ('f2',):
             self.start_edit()
+        elif k == 'f4':
+            self.toggle_chart()
         elif k in ('delete', 'backspace'):
             self.clear_sel()
         elif k == 'ctrl+c':

@@ -532,11 +532,45 @@ def render(wm, rgb, w, h, mode=None, dither=None, dim=1.0, grey=False):
     R = grey_renderer(wm) if grey else renderer(wm)
     if dim != 1.0:
         rgb = bytes(int(v * dim) for v in rgb)
+    if mode == 'ink':
+        return render_ink(wm, rgb, w, h, dither)
     if mode == 'pixel':
         return _render_pixel(R, rgb, w, h, dither)
     if mode in ('ascii', 'mono'):
         return _render_ascii(R, rgb, w, h, mode, wm.theme, wm.cfg.get('ascii_charset', 'full'))
     return _render_blend(R, rgb, w, h, dither)
+
+
+def render_ink(wm, rgb, w, h, dither=None, ink=None, paper=None, charset=None):
+    """The image viewer's ASCII art, but the way a mono printer sees it.
+
+    Same characters as the viewer (Settings -> ASCII charset), one ink, no
+    background colour. Black maps to ' ', so a black background is paper.
+    """
+    th = wm.theme
+    ink = th.c('text', 'win') if ink is None else ink
+    paper = th.c('text', 'win') if paper is None else paper
+    charset = charset or wm.cfg.get('ascii_charset', 'full')
+    if charset == 'simple':
+        ramp = ASCII_RAMP
+    elif charset == 'shades':
+        ramp = ASCII_SHADES if __import__('monocell.util', fromlist=['UNICODE']).UNICODE else ASCII_FULL
+    else:
+        ramp = ASCII_FULL
+    nr = len(ramp) - 1
+    rows = []
+    o = 0
+    for y in range(h):
+        cs = []
+        ats = []
+        for x in range(w):
+            lum = (rgb[o] * 299 + rgb[o + 1] * 587 + rgb[o + 2] * 114) // 1000
+            o += 3
+            c = ramp[lum * nr // 255]
+            cs.append(c)
+            ats.append(paper if c == ' ' else ink)
+        rows.append((''.join(cs), ats))
+    return rows
 
 
 def _bayer(dither):

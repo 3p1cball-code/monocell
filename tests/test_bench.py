@@ -83,6 +83,78 @@ class TestSensors(unittest.TestCase):
         self.assertTrue(bench.cpu_label())
 
 
+class TestTempRoles(unittest.TestCase):
+    def test_thresholds(self):
+        self.assertIsNone(hardware.temp_role(None))
+        self.assertEqual(hardware.temp_role(40), 'green')
+        self.assertEqual(hardware.temp_role(79), 'green')
+        self.assertEqual(hardware.temp_role(80), 'yellow')
+        self.assertEqual(hardware.temp_role(89), 'yellow')
+        self.assertEqual(hardware.temp_role(90), 'red')
+        self.assertEqual(hardware.temp_role(99), 'red')
+
+    def test_uses_rounded_value(self):
+        self.assertEqual(hardware.temp_role(79.6), 'yellow')
+        self.assertEqual(hardware.temp_role(89.6), 'red')
+
+
+class TestLongTest(unittest.TestCase):
+    def test_durations(self):
+        self.assertEqual(bench.LONG_TESTS, sorted(set(bench.LONG_TESTS)))
+        self.assertIn(bench.DEFAULT_LONG, bench.LONG_TESTS)
+        self.assertEqual(bench.next_duration(300), 600)
+        self.assertEqual(bench.next_duration(3600), 300)
+        self.assertEqual(bench.next_duration(999), 300)
+
+    def test_duration_format(self):
+        self.assertEqual(bench.fmt_duration(0), '0:00')
+        self.assertEqual(bench.fmt_duration(65), '1:05')
+        self.assertEqual(bench.fmt_duration(600), '10:00')
+
+    def test_stats(self):
+        st = bench.TempStats(recent=2)
+        st.add(50, 4000)
+        st.add(60, 4100)
+        st.add(None, None)
+        st.add(70, 4200)
+        self.assertEqual(st.temp_n, 3)
+        self.assertAlmostEqual(st.temp_avg(), 60.0)
+        self.assertEqual((st.temp_min, st.temp_max), (50, 70))
+        self.assertAlmostEqual(st.recent_temp_avg(), 65.0)
+        self.assertEqual(st.fan_n, 3)
+        self.assertAlmostEqual(st.fan_avg(), 4100.0)
+        self.assertEqual((st.fan_min, st.fan_max), (4000, 4200))
+
+    def test_summary(self):
+        st = bench.TempStats()
+        for temp, fan in ((50, 4000), (60, 4100), (70, 4200)):
+            st.add(temp, fan)
+        reason, line1, line2 = bench.long_summary(st, [10.0, 9.8], 600)
+        self.assertEqual(reason, 'done')
+        self.assertIn('long test done 10:00', line1)
+        self.assertIn('2 runs', line1)
+        self.assertIn('temp avg 60.0', line1)
+        self.assertIn('max 70 C', line1)
+        self.assertIn('last min avg 60.0 C', line2)
+        self.assertIn('fan avg 4100  max 4200 rpm', line2)
+        self.assertIn('run 10.00 -> 9.80 s', line2)
+
+    def test_summary_single_run(self):
+        st = bench.TempStats()
+        st.add(50, 4000)
+        reason, line1, line2 = bench.long_summary(st, [9.7], 60)
+        self.assertIn('1 run', line1)
+        self.assertNotIn('1 runs', line1)
+        self.assertNotIn('->', line2)
+
+    def test_summary_stopped_before_any_sample(self):
+        reason, line1, line2 = bench.long_summary(bench.TempStats(), [], 12, 'stopped')
+        self.assertEqual(reason, 'stopped')
+        self.assertIn('long test stopped 0:12', line1)
+        self.assertIn('0 runs', line1)
+        self.assertEqual(line2, '')
+
+
 class TestRegistration(unittest.TestCase):
     def test_registered(self):
         names = [row[0] for row in REGISTRY]
