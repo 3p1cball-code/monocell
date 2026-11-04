@@ -164,3 +164,27 @@ monocell-clip --set < datei   # setzen
   versucht das beim Start; Debian ist normalerweise bereits UTF-8).
 - Chromium/Brave ist auf dem X61s optional; ohne Browser läuft die lite-Engine.
 - Auf dem VT ist der Software-Zeiger von monocell aktiv (kein gpm nötig).
+
+## Login-Screen, Font-Fix und Updates (`install-extras.sh`)
+
+Einmalig als root, danach bei Bedarf:
+
+```sh
+sudo ./install-extras.sh --user ariedel      # alles einrichten
+sudo ./install-extras.sh --user ariedel --issue-only   # Login-Screen neu (nach Theme-Wechsel)
+sudo ./install-extras.sh --uninstall         # alles zurückbauen
+```
+
+Das Skript
+
+* repariert das `=` in `/usr/share/consolefonts/Lat15-3270.psf.gz` (Sicherung
+  `*.monocell-orig`), weil das Hinting des 3270-Fonts die zwei Balken bei 16 px
+  zu einer Linie zusammenfallen lässt,
+* erzeugt `/etc/issue` mit Theme-Palette (OSC), MONOCELL-Wortmarke, Hostname,
+  Debian-Version, Datum/Uhrzeit und Fingerabdruck-Hinweis (`make_issue.py`,
+  Sicherung `/etc/issue.monocell-orig`),
+* installiert `/usr/local/sbin/monocell-apt` und
+  `/etc/sudoers.d/monocell-apt`: erlaubt dem Benutzer **nur**
+  `monocell-apt update` und `monocell-apt upgrade` ohne Passwort, für die
+  Updates-App (System → Updates). Der Helfer entfernt nie Pakete und behält
+  lokale Konfigurationsdateien (`--force-confold`).
