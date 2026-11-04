@@ -19,15 +19,17 @@ Hardware (getestet gegen ein ThinkPad X61s mit 1024×768).
 |---|---|
 | ![Maps im Grafikmodus](screenshots/maps.png) | ![Bild im Grafikmodus](screenshots/viewer-gfx.png) |
 
-**Writer und Login-Screen:**
-
-| | |
-|---|---|
-| ![Writer mit Seite, grosser Schrift und Bild](screenshots/writer.png) | ![Login-Screen](screenshots/login.png) |
-
 *Screenshots aus dem Demo-Home, 120–160 Spalten (die beiden Grafikmodus-Bilder sind
 Abbilder des Framebuffers; das Motiv ist „The Blue Marble", NASA, gemeinfrei). Die
 Fensterrahmen skalieren mit dem Terminal; alles hier ist echte Ausgabe, keine Mockups.*
+
+**Auf der Konsole (X61s, IBM-3270-Font, 113×48):** echte Konsolenausgabe, gerendert mit
+dem PSF-Font und der Theme-Palette (`tools/snap.py --psf`):
+
+| | |
+|---|---|
+| ![Startmenü auf der Konsole](screenshots/console-menu.png) | ![Writer auf der Konsole](screenshots/writer.png) |
+| ![Dateisuche](screenshots/console-search.png) | ![Login-Screen](screenshots/login.png) |
 
 **Text-Screenshot:** `Alt+S` speichert zwei Dateien in `~/monocell-shots/`:
 `…md` mit dem Bild als reinem Text (lesbar in Kate, GitHub und jedem Editor) und
