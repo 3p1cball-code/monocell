@@ -27,7 +27,7 @@
   do not exist - maps and pictures dragged/zoomed nothing). Now `term.w`/`term.h`.
 - **Fix**: the screen-size helper for the still pipeline centres and pads correctly
   (was only used at full size before).
-- Tests: 532 (new: webgfx geometry/hotkeys, CDP key mapping, console font, partial
+- Tests: 535 (new: webgfx geometry/hotkeys/pointer, CDP key mapping, console font, partial
   row repaint, original-mode pipeline).
 
 ## 1.2.0 — 2026-11-04
