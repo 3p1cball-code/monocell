@@ -84,12 +84,12 @@ class TestPointer(unittest.TestCase):
     def test_original_is_one_pixel_black_on_white(self):
         self.assertEqual(self.make(True).pointer_style(), (1, (0, 0, 0), (255, 255, 255)))
 
-    def test_look_uses_blocks_and_its_palette(self):
+    def test_look_uses_half_a_canvas_pixel_and_its_palette(self):
         size, outline, fill = self.make(False, 'amber').pointer_style()
-        self.assertEqual(size, 4)                      # one canvas pixel
+        self.assertEqual(size, 2)                      # half a canvas pixel (4)
         self.assertEqual(outline, (0, 0, 0))
         self.assertEqual(fill, (255, 240, 205))        # burnt-out phosphor
-        self.assertEqual(self.make(False, 'cga').pointer_style()[0], 4)
+        self.assertEqual(self.make(False, 'cga').pointer_style()[0], 2)
 
     def test_pointer_is_drawn_in_aligned_blocks(self):
         g = self.make(False, 'amber')
@@ -98,12 +98,15 @@ class TestPointer(unittest.TestCase):
         g.sess = type('S', (), {'fb': fb, 'screen': (64, 48)})()
         buf = bytearray(64 * 4 * 48)
         x, y = g.draw_pointer(buf, 5, 7)
-        self.assertEqual((x % 4, y % 4), (0, 0))
-        row = y * 256
-        self.assertEqual(buf[row + x * 4:row + x * 4 + 4], bytes(4))          # outline block
-        fill = buf[row + 8 * 256 + (x + 4) * 4:row + 8 * 256 + (x + 4) * 4 + 4]
-        self.assertEqual(fill, bytes((205, 240, 255, 0)))                     # '.', BGRX
-        self.assertEqual(g.draw_pointer(buf, 10_000, 10_000)[0] % 4, 0)       # stays on screen
+        self.assertEqual((x % 2, y % 2), (0, 0))      # on the picture's grid
+        block = {bytes(buf[(y + r) * 256 + (x + c) * 4:(y + r) * 256 + (x + c) * 4 + 4])
+                 for r in range(2) for c in range(2)}
+        self.assertEqual(block, {bytes(4)})           # outline: one 2x2 block
+        fill = {bytes(buf[(y + 12 + r) * 256 + (x + 6 + c) * 4:
+                          (y + 12 + r) * 256 + (x + 6 + c) * 4 + 4])
+                for r in range(2) for c in range(2)}
+        self.assertEqual(fill, {bytes((205, 240, 255, 0))})   # '.', BGRX, 2x2
+        self.assertEqual(g.draw_pointer(buf, 10_000, 10_000)[0] % 2, 0)       # stays on screen
 
 
 class TestHotkeys(unittest.TestCase):

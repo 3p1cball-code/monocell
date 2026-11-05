@@ -511,16 +511,21 @@ class WebGfx:
             th = self.app.th
             cols = fbmode.palette_colours(look, th.rgb, th.rgb[th.r['accent']])
             lum = [r * 299 + g * 587 + b * 114 for r, g, b in cols]
-            self._pstyle = (scale, cols[lum.index(min(lum))], cols[lum.index(max(lum))])
+            self._pstyle = (max(1, scale // 2),    # half a canvas pixel: big enough,
+                            cols[lum.index(min(lum))], cols[lum.index(max(lum))])
             self._pstyle_key = key
         return self._pstyle
 
     def pointer_origin(self):
-        """(block size, x0, y0) of the canvas grid the pointer snaps to."""
-        scale = self.pointer_style()[0]
+        """(block size, x0, y0) of the grid the pointer snaps to.
+
+        The grid is the picture's own: the pointer blocks line up with the canvas
+        pixels (the block itself is half a canvas pixel in the looks)."""
+        block = self.pointer_style()[0]
+        scale = self.look()[1]
         W, H = self.sess.screen
         cw, ch = fbmode.canvas((W, H), scale)
-        return scale, (W - cw * scale) // 2, (H - ch * scale) // 2
+        return block, (W - cw * scale) // 2, (H - ch * scale) // 2
 
     def show(self):
         """Full frame: base + pointer."""
