@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.1 — 2026-11-05
+
+- **Zoom in the browser's graphics mode**: `Ctrl++` / `Ctrl+-` / `Ctrl+0` step through
+  50-300 % (also `Alt++`/`Alt+-`/`Alt+0` where a terminal cannot tell Ctrl from a
+  printable key). Zooming in is the browser's page scale - the layout stays, the
+  picture is magnified and stays sharp, the wheel pans it; zooming out uses a wider
+  CSS viewport and the frames are scaled down. Stored as `web_zoom`
+  (Settings -> Web).
+- **Linux console**: Ctrl held while a character key produces no control code (Ctrl++
+  on a German layout) is passed on now; before, such keys arrived without the modifier.
+- Tests: 538.
+
 ## 1.3.0 — 2026-11-05
 
 - **Browser graphics mode (Ctrl+G)**: the text view stays as it was (own HTML parser,
@@ -18,10 +30,6 @@
   canvas pixel) in the darkest and brightest colours of that look's palette.
   Text from the text view is dropped: Chromium is now only the graphics mode.
   Ads/trackers blocked, fonts and pictures not; popups stay in the tab.
-- **Browser zoom** in the graphics mode: `Ctrl++`/`Ctrl+-`/`Ctrl+0` (and `Alt++`/`Alt+-`
-  where Ctrl and a printable key cannot be told apart), 50-300 %. Zooming in uses the
-  browser's page scale - the layout stays, the picture is magnified and stays sharp,
-  the wheel pans it; zooming out uses a wider CSS viewport. Saved as `web_zoom`.
 - **Original mode in every graphics app** (`o` in video, pictures, maps, browser):
   full display resolution in full colour - no palette, no dither, no upscale. The
   video graph and the still pipeline have a plain path for it (stills need no
