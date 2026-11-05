@@ -131,8 +131,8 @@ class TestHotkeys(unittest.TestCase):
             self.assertTrue(webgfx.is_hotkey(k, True), k)
             self.assertTrue(webgfx.is_hotkey(k, False), k)
 
-    def test_letters_only_outside_fields(self):
-        for k in ('g', 'o', 'l', 'r', 'c', 'd', 's', 'backspace'):
+    def test_letters_and_zoom_keys_only_outside_fields(self):
+        for k in ('g', 'o', 'l', 'r', 'c', 'd', 's', 'backspace', '+', '=', '-'):
             self.assertTrue(webgfx.is_hotkey(k, False), k)
             self.assertFalse(webgfx.is_hotkey(k, True), k)
 

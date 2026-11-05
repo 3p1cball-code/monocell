@@ -2,14 +2,16 @@
 
 ## 1.3.1 — 2026-11-05
 
-- **Zoom in the browser's graphics mode**: `Ctrl++` / `Ctrl+-` / `Ctrl+0` step through
-  50-300 % (also `Alt++`/`Alt+-`/`Alt+0` where a terminal cannot tell Ctrl from a
-  printable key). Zooming in is the browser's page scale - the layout stays, the
-  picture is magnified and stays sharp, the wheel pans it; zooming out uses a wider
-  CSS viewport and the frames are scaled down. Stored as `web_zoom`
-  (Settings -> Web).
-- **Linux console**: Ctrl held while a character key produces no control code (Ctrl++
-  on a German layout) is passed on now; before, such keys arrived without the modifier.
+- **Zoom in the browser's graphics mode**: `+` / `-` (also `Alt++` / `Alt+-`, or
+  `Ctrl++` in a terminal window) step through 50-300 %, `Alt+0` back to 100 %.
+  Zooming in is the browser's page scale - the layout stays, the picture is magnified
+  and stays sharp, the wheel pans it; zooming out uses a wider CSS viewport and the
+  frames are scaled down. Outside text fields the bare keys zoom; while typing in a
+  field they are typed. Stored as `web_zoom` (Settings -> Web).
+- **Linux console**: Ctrl with a character key cannot be used - the console keymap
+  turns `Ctrl++` into `Ctrl+^` and `Ctrl+-` into `Ctrl+_` (see
+  `/etc/console-setup/cached_*.kmap`), so `Alt++`/`Alt+-` (Meta_plus, arrives as
+  ESC + character) and the bare keys are the ones that work there.
 - Tests: 538.
 
 ## 1.3.0 — 2026-11-05

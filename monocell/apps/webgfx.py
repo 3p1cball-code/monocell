@@ -88,7 +88,10 @@ def is_hotkey(k, editing):
         return True
     if editing:
         return False
-    return k in ('g', 'o', 'l', 'r', 'c', 'd', 's', 'backspace')
+    # On the VT Ctrl++ cannot work: the console keymap turns Ctrl+'+' into Ctrl+^
+    # (and Ctrl+'-' into Ctrl+_), so the bare keys and Alt+'+'/Alt+'-' (Meta_plus,
+    # Meta_minus - they arrive as ESC + character) are what works there.
+    return k in ('g', 'o', 'l', 'r', 'c', 'd', 's', 'backspace', '+', '=', '-')
 
 
 class WebGfx:
@@ -201,7 +204,7 @@ class WebGfx:
             self.stop()
             self.wm.toast('Chromium: %s' % e, 'red')
         self.app.thread(work, done, fail)
-        self.note('CTRL+G TEXT VIEW  CTRL+L ADDRESS  O ORIGINAL  ALT+LEFT BACK', secs=4.0)
+        self.note('CTRL+G TEXT VIEW  CTRL+L ADDRESS  + - ZOOM  O ORIGINAL', secs=4.0)
         return True
 
     def stop(self):
@@ -785,9 +788,9 @@ class WebGfx:
             self.change('gfx_dither', list(fbmode.DITHERS))
         elif k in ('alt+s', 's'):
             self.change('gfx_scanlines', [False, True])
-        elif k in ('ctrl++', 'ctrl+=', 'alt++', 'alt+='):
+        elif k in ('ctrl++', 'ctrl+=', 'alt++', 'alt+=', '+', '='):
             self.set_zoom(step_zoom(self.zoom, 1))
-        elif k in ('ctrl+-', 'alt+-'):
+        elif k in ('ctrl+-', 'alt+-', '-'):
             self.set_zoom(step_zoom(self.zoom, -1))
         elif k in ('ctrl+0', 'alt+0'):
             self.set_zoom(1.0)

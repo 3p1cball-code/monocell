@@ -171,7 +171,7 @@ monocell-clip --clear
   | `Ctrl+G` / `g` | zurück zur Textansicht (lädt dieselbe Adresse) |
   | `Ctrl+L` / `l` | Adresszeile in der Statusleiste (Klick auf die Leiste auch) |
   | `Ctrl+R` / `F5` / `r` | neu laden · `Alt+←/→`, `Backspace` Verlauf |
-  | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | zoomen (50–300 %) und zurücksetzen – im Terminal auch `Alt++`/`Alt+-`; das Mausrad schwenkt den vergrößerten Ausschnitt |
+  | `+` / `-` (oder `Alt++` / `Alt+-`) | zoomen, 50–300 %; `Alt+0` zurück auf 100 %. Das Mausrad schwenkt den vergrößerten Ausschnitt. (`Ctrl++` geht nur in Terminalfenstern – die Konsolen-Keymap macht daraus `Ctrl+^`.) |
   | `Ctrl+O` / `o` | Original ↔ Retro-Look · `Alt+C/D/S` Look, Dithering, Scanlines |
   | `Ctrl+C` / `Ctrl+V` | Auswahl kopieren / monocell-Zwischenablage einfügen |
   | `Esc` | Feld verlassen, sonst Grafikmodus beenden |
