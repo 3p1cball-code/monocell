@@ -160,9 +160,9 @@ monocell-clip --clear
   sobald sich etwas ändert (kein Dauerfeuer; die Seite wartet auf unsere Bestätigung,
   also höchstens ~20 Bilder/s). Maus und Tastatur gehen als echte Eingaben zurück;
   der Zeiger wird selbst gezeichnet und zeilenweise aktualisiert. Der Browser startet
-  in voller Auflösung und Farbe; `Ctrl+O`/`o` schaltet auf die Retro-Looks des Players
-  (die Anfrage an Chromium wird dann auf ein Viertel der Auflösung verkleinert – die
-  JPEGs bleiben klein). Werbefarmen sind geblockt, Schriften und Bilder nicht;
+  im eingestellten Retro-Look mit einem Viertel der Auflösung (Chromium liefert dann
+  entsprechend kleine JPEGs); `Ctrl+O`/`o` schaltet auf das Original in voller
+  Auflösung und Farbe. Werbefarmen sind geblockt, Schriften und Bilder nicht;
   `--password-store=basic` (ohne Desktop-Sitzung hing die erste Anfrage sonst 25 s am
   Schlüsselbund). Popups bleiben im selben Tab, Dialoge werden angenommen.
 

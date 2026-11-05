@@ -7,8 +7,9 @@
   Chromium/Brave over the DevTools protocol. Frames arrive only when the page
   changes (Page.startScreencast, acked at most ~20/s), mouse and keyboard go back in
   as real input events, the pointer is drawn locally and updated row by row.
-  In full resolution and colour by default; `Ctrl+O`/`o` switches to the player's
-  retro looks, and Chromium then renders only a quarter of the screen for us.
+  Starts in the configured retro look at a quarter resolution (Chromium then renders
+  only a quarter of the screen for us); `Ctrl+O`/`o` switches to the original in full
+  resolution and colour.
   Address bar in the status line (`Ctrl+L`), history (`Alt+Left/Right`, `Backspace`),
   reload (`Ctrl+R`/`F5`), copy (`Ctrl+C`) and the monocell clipboard (`Ctrl+V`),
   clickable links/fields/buttons, double clicks, wheel and middle-button scrolling.

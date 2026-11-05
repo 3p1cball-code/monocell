@@ -2,9 +2,10 @@
 
 The text view (lite engine) cannot run JavaScript. Here a headless Chromium renders
 the page and sends a frame whenever something changed (Page.startScreencast); the
-frame goes through the same chain as video, pictures and maps - full resolution and
-colour by default ('o' toggles the retro looks) - and mouse and keyboard go back in
-as real input events. The pointer is drawn here and updated row by row.
+frame goes through the same chain as video, pictures and maps - the configured retro
+look at a quarter resolution by default ('o' toggles full resolution and colour) -
+and mouse and keyboard go back in as real input events. The pointer is drawn here
+and updated row by row.
 
 Keys that never reach the page: Ctrl+G (text view), Ctrl+O (original/look),
 Ctrl+L (address), Ctrl+R/F5 (reload), Alt+Left/Right (history), Ctrl+V (paste the
@@ -91,7 +92,8 @@ class WebGfx:
         self.page = None
         self.live_page = None          # set as soon as the tab exists (frame acks)
         self.pipe = None
-        self.original = True           # the browser starts in full resolution and colour
+        self.original = False          # starts in the configured retro look (quarter
+        #                                resolution); Ctrl+O/o shows the original
         self.font = None
         self.frame_img = None          # last page picture (PIL, viewport size)
         self.base = None               # frame bytes without the pointer
@@ -185,7 +187,7 @@ class WebGfx:
             self.stop()
             self.wm.toast('Chromium: %s' % e, 'red')
         self.app.thread(work, done, fail)
-        self.note('CTRL+G TEXT VIEW  CTRL+L ADDRESS  O LOOK  ALT+LEFT BACK', secs=4.0)
+        self.note('CTRL+G TEXT VIEW  CTRL+L ADDRESS  O ORIGINAL  ALT+LEFT BACK', secs=4.0)
         return True
 
     def stop(self):
