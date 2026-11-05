@@ -2411,5 +2411,8 @@ drag selects.  Ctrl+Shift+C copies, Ctrl+Shift+V / Ctrl+V / Shift+Insert / a
 middle click pastes - also on the Linux console.  Right-click shows Copy/Paste.
 monocell-clip prints or sets the shared clipboard in any shell.  KDE Connect (System menu): pair the phone, send or
 pull the clipboard, share files.  Browser: Ctrl+L address, Tab links, Enter
-opens, Ctrl+D bookmark, Ctrl+F find.  Music: Space plays, n/p next.
+opens, Ctrl+D bookmark, Ctrl+F find, Ctrl+G shows the page as real pixels
+(graphics mode; there Ctrl+G back, Ctrl+L address, Ctrl+O look).  Music:
+Space plays, n/p next.  Graphics mode (video, pictures, maps, browser): g/Esc
+back, c/d/s look, dither, scanlines, o original size.
 """
