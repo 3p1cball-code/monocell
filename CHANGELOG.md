@@ -13,6 +13,8 @@
   reload (`Ctrl+R`/`F5`), copy (`Ctrl+C`) and the monocell clipboard (`Ctrl+V`),
   clickable links/fields/buttons, double clicks, wheel and middle-button scrolling.
   Single-letter hotkeys act only outside text fields (`Ctrl` combinations always).
+  The pointer follows the look: with a retro look it is drawn as canvas-sized blocks
+  (4x4 pixels) in the darkest and brightest colours of that look's palette.
   Text from the text view is dropped: Chromium is now only the graphics mode.
   Ads/trackers blocked, fonts and pictures not; popups stay in the tab.
 - **Original mode in every graphics app** (`o` in video, pictures, maps, browser):

@@ -67,6 +67,45 @@ class TestGeometry(unittest.TestCase):
             self.assertTrue(runs)
 
 
+class TestPointer(unittest.TestCase):
+    """The pointer follows the look: one block per canvas pixel, palette colours."""
+
+    def make(self, original, look='amber'):
+        g = webgfx.WebGfx.__new__(webgfx.WebGfx)
+        g.original = original
+        g.wm = type('WM', (), {'cfg': {'gfx_look': look, 'gfx_dither': 'bayer',
+                                       'gfx_scanlines': False}})()
+        th = type('Th', (), {})()
+        th.rgb = [(0, 0, 0)] * 16
+        th.r = {'accent': 1, 'dim': 2, 'shadow': 0, 'bright': 15, 'field': 3}
+        g.app = type('App', (), {'th': th})()
+        return g
+
+    def test_original_is_one_pixel_black_on_white(self):
+        self.assertEqual(self.make(True).pointer_style(), (1, (0, 0, 0), (255, 255, 255)))
+
+    def test_look_uses_blocks_and_its_palette(self):
+        size, outline, fill = self.make(False, 'amber').pointer_style()
+        self.assertEqual(size, 4)                      # one canvas pixel
+        self.assertEqual(outline, (0, 0, 0))
+        self.assertEqual(fill, (255, 240, 205))        # burnt-out phosphor
+        self.assertEqual(self.make(False, 'cga').pointer_style()[0], 4)
+
+    def test_pointer_is_drawn_in_aligned_blocks(self):
+        g = self.make(False, 'amber')
+        fb = type('FB', (), {'bytes_pp': 4, 'stride': 64 * 4,
+                             'pixel': lambda self, rgb: bytes((rgb[2], rgb[1], rgb[0], 0))})()
+        g.sess = type('S', (), {'fb': fb, 'screen': (64, 48)})()
+        buf = bytearray(64 * 4 * 48)
+        x, y = g.draw_pointer(buf, 5, 7)
+        self.assertEqual((x % 4, y % 4), (0, 0))
+        row = y * 256
+        self.assertEqual(buf[row + x * 4:row + x * 4 + 4], bytes(4))          # outline block
+        fill = buf[row + 8 * 256 + (x + 4) * 4:row + 8 * 256 + (x + 4) * 4 + 4]
+        self.assertEqual(fill, bytes((205, 240, 255, 0)))                     # '.', BGRX
+        self.assertEqual(g.draw_pointer(buf, 10_000, 10_000)[0] % 4, 0)       # stays on screen
+
+
 class TestHotkeys(unittest.TestCase):
     def test_ctrl_keys_are_always_ours(self):
         for k in ('ctrl+g', 'ctrl+o', 'ctrl+l', 'ctrl+r', 'ctrl+v', 'ctrl+c',

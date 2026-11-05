@@ -50,6 +50,12 @@ POINTER_W = max(len(r) for r in POINTER)
 POINTER_H = len(POINTER)
 
 
+def snap_to(v, origin, step, hi):
+    """Nearest step boundary above `origin`, kept between 0 and `hi`."""
+    v = origin + int(round((v - origin) / float(step))) * step
+    return max(0, min(v, hi))
+
+
 def page_size(screen):
     """Viewport of the page: the screen above the bar."""
     return screen[0], max(1, screen[1] - HUD_H)
@@ -489,30 +495,62 @@ class WebGfx:
         else:
             self.show()
 
+    def pointer_style(self):
+        """(block size, outline colour, fill colour) of the pointer.
+
+        With a retro look the pointer is one canvas pixel per block - as chunky as
+        the picture - and takes the darkest and brightest colour of that look's
+        palette, so it never breaks the look with a crisp full-colour arrow."""
+        look, scale, dither, scan = self.look()
+        if self.original:
+            return 1, (0, 0, 0), (255, 255, 255)
+        key = (look, scale, self.app.th.rgb[0])
+        if getattr(self, '_pstyle_key', None) != key:
+            th = self.app.th
+            cols = fbmode.palette_colours(look, th.rgb, th.rgb[th.r['accent']])
+            lum = [r * 299 + g * 587 + b * 114 for r, g, b in cols]
+            self._pstyle = (scale, cols[lum.index(min(lum))], cols[lum.index(max(lum))])
+            self._pstyle_key = key
+        return self._pstyle
+
+    def pointer_origin(self):
+        """(block size, x0, y0) of the canvas grid the pointer snaps to."""
+        scale = self.pointer_style()[0]
+        W, H = self.sess.screen
+        cw, ch = fbmode.canvas((W, H), scale)
+        return scale, (W - cw * scale) // 2, (H - ch * scale) // 2
+
     def show(self):
         """Full frame: base + pointer."""
         frame = bytearray(self.base)
-        self.draw_pointer(frame, self.px, self.py)
-        self.drawn_ptr = (int(self.px), int(self.py))
+        self.drawn_ptr = self.draw_pointer(frame, self.px, self.py)
         self.sess.show(frame)
 
     def draw_pointer(self, buf, x, y):
+        """Draw the arrow; returns where it ended up (snapped to the pixel grid)."""
         g = self.sess
         fb = g.fb
         W, H = g.screen
         bp, st = fb.bytes_pp, fb.stride
-        x, y = int(x), int(y)
-        dark, light = fb.pixel((0, 0, 0)), fb.pixel((255, 255, 255))
+        size, outline, fill = self.pointer_style()
+        ink = {1: fb.pixel(outline), 0: fb.pixel(fill)}
+        _, x0, y0 = self.pointer_origin()
+        x = snap_to(int(x), x0, size, W - POINTER_W * size)
+        y = snap_to(int(y), y0, size, H - POINTER_H * size)
         for r, runs in enumerate(POINTER_RUNS):
-            yy = y + r
-            if yy >= H:
+            yy = y + r * size
+            if yy + size > H:
                 break
-            row = yy * st
             for dx, c in runs:
-                xx = x + dx
-                if xx < W:
-                    o = row + xx * bp
-                    buf[o:o + bp] = dark if c == '#' else light
+                xx = x + dx * size
+                if xx + size > W:
+                    continue
+                pix = ink[1 if c == '#' else 0]
+                block = pix * size
+                for row in range(yy, yy + size):
+                    o = row * st + xx * bp
+                    buf[o:o + len(block)] = block
+        return x, y
 
     def move_pointer(self, x, y):
         if not self.sess or self.base is None:
@@ -523,18 +561,19 @@ class WebGfx:
             self.px, self.py = x, y
             self.show()
             return
+        size, x0, y0 = self.pointer_origin()
+        W, H = self.sess.screen
         ox, oy = self.drawn_ptr or (int(self.px), int(self.py))
-        nx, ny = int(x), int(y)
         self.px, self.py = x, y
+        st = self.sess.fb.stride
+        nx = snap_to(int(x), x0, size, W - POINTER_W * size)
+        ny = snap_to(int(y), y0, size, H - POINTER_H * size)
         if (nx, ny) == (ox, oy):
             return
-        st = self.sess.fb.stride
-        H = self.sess.screen[1]
-        for yy in range(oy, min(H, oy + POINTER_H)):         # erase the old one
+        for yy in range(oy, min(H, oy + POINTER_H * size)):  # erase the old one
             frame[yy * st:(yy + 1) * st] = self.base[yy * st:(yy + 1) * st]
-        self.draw_pointer(frame, nx, ny)
-        self.drawn_ptr = (nx, ny)
-        lo, hi = min(oy, ny), max(oy, ny) + POINTER_H
+        self.drawn_ptr = self.draw_pointer(frame, nx, ny)
+        lo, hi = min(oy, ny), max(oy, ny) + POINTER_H * size
         self.sess.paint_rows(lo, min(H, hi))
 
     def idle(self):
