@@ -8,6 +8,10 @@
   and stays sharp, the wheel pans it; zooming out uses a wider CSS viewport and the
   frames are scaled down. Outside text fields the bare keys zoom; while typing in a
   field they are typed. Stored as `web_zoom` (Settings -> Web).
+- **Browser sound** in the graphics mode: Chromium no longer starts muted
+  (`--mute-audio` was left over from the text engine). Video and audio play through
+  the system output; playback still needs a click (autoplay is off). Verified on the
+  X61s at the Pulse sink monitor.
 - **Linux console**: Ctrl with a character key cannot be used - the console keymap
   turns `Ctrl++` into `Ctrl+^` and `Ctrl+-` into `Ctrl+_` (see
   `/etc/console-setup/cached_*.kmap`), so `Alt++`/`Alt+-` (Meta_plus, arrives as

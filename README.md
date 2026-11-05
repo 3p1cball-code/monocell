@@ -162,7 +162,9 @@ monocell-clip --clear
   der Zeiger wird selbst gezeichnet und zeilenweise aktualisiert. Der Browser startet
   im eingestellten Retro-Look mit einem Viertel der Auflösung (Chromium liefert dann
   entsprechend kleine JPEGs); `Ctrl+O`/`o` schaltet auf das Original in voller
-  Auflösung und Farbe. Werbefarmen sind geblockt, Schriften und Bilder nicht;
+  Auflösung und Farbe. **Ton** läuft über die System-Audioausgabe (Wiedergabe erst
+  nach einem Klick, Autoplay ist aus). Werbefarmen sind geblockt, Schriften und
+  Bilder nicht;
   `--password-store=basic` (ohne Desktop-Sitzung hing die erste Anfrage sonst 25 s am
   Schlüsselbund). Popups bleiben im selben Tab, Dialoge werden angenommen.
 

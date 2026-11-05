@@ -599,7 +599,7 @@ class Chromium:
             pass
         args = [exe, '--headless=new', '--remote-debugging-port=0', '--remote-allow-origins=*',
                 '--user-data-dir=' + self.dir, '--no-first-run', '--no-default-browser-check', '--disable-gpu',
-                '--mute-audio', '--window-size=1024,768', '--disable-extensions',
+                '--window-size=1024,768', '--disable-extensions',
                 '--autoplay-policy=user-gesture-required',
                 # without a desktop session the keyring lookup blocks the first request for the
                 # 25 s D-Bus timeout; cookies are encrypted with the built-in key instead
