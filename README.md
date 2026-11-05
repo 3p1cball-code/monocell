@@ -19,9 +19,11 @@ Browser; `o` schaltet überall auf das Original (volle Auflösung, volle Farben)
 | | |
 |---|---|
 | ![Maps im Grafikmodus](screenshots/maps.png) | ![Bild im Grafikmodus](screenshots/viewer-gfx.png) |
+| ![Browser im Grafikmodus](screenshots/browser-gfx.png) | ![Derselbe Browser im Retro-Look](screenshots/browser-gfx-look.png) |
 
-*Screenshots aus dem Demo-Home, 120–160 Spalten (die beiden Grafikmodus-Bilder sind
-Abbilder des Framebuffers; das Motiv ist „The Blue Marble", NASA, gemeinfrei). Die
+*Screenshots aus dem Demo-Home, 120–160 Spalten (die Grafikmodus-Bilder sind Abbilder
+des Framebuffers; das Motiv im Bildbetrachter ist „The Blue Marble", NASA, gemeinfrei;
+die zwei Browser-Bilder sind dieselbe Seite in Original und als `VGA 256`). Die
 Fensterrahmen skalieren mit dem Terminal; alles hier ist echte Ausgabe, keine Mockups.*
 
 **Auf der Konsole (X61s, IBM-3270-Font, 113×48):** echte Konsolenausgabe, gerendert mit
