@@ -1541,9 +1541,14 @@ class WM:
         """`app` draws into the framebuffer itself: no text rendering, all input to it."""
         self.gfx = app
         self.close_popup()
+        if self.term.mice:
+            self.term.mice.set_fine(True)
 
     def leave_gfx(self):
         self.gfx = None
+        if self.term.mice:
+            self.term.mice.set_fine(False)
+            self.mouse_pos = (int(self.term.mice.fx), int(self.term.mice.fy))
         self.term.front = None            # the text screen was gone: repaint everything
         self.term.apply_palette()
         self.dirty = True

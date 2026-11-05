@@ -1,4 +1,5 @@
-"""Web browser: lite (urllib) or headless Chromium engine, laid out as clean text."""
+"""Web browser: pages as clean text (lite engine, no JavaScript); Ctrl+G shows the page
+as real pixels from a headless Chromium (graphics mode, webgfx.py)."""
 import os
 import re
 import threading
@@ -321,28 +322,20 @@ class Browser(App):
         self.status = ''
         self.hover_url = ''
         self.engine = None
-        self.engine_name = self.pick_engine()
+        self.engine_name = 'lite'
+        self.gfx = None            # WebGfx while the page is shown in graphics mode
         self.img_cache = {}
         self.img_loading = set()
         self.img_gen = 0           # bumped (debounced) when images arrive -> one relayout
         self.relayout_pending = False
         self.engine_lock = threading.Lock()
+        self.notice = ''
         self.edit = None           # (widget, TextField) while typing into a page field
         self.find = None
         self.reader = True
         start = url or self.cfg.get('web_home') or HOME_URL
-        if self.engine_name == 'chromium' and start == HOME_URL:
-            # start the headless browser while the user is still typing an address
-            self.thread(self.get_engine, lambda e: None, lambda e: None)
+        self.every(0.5, self.gfx_idle)
         self.navigate(start)
-
-    def pick_engine(self):
-        pref = self.cfg.get('web_engine', 'auto')
-        if pref == 'lite':
-            return 'lite'
-        if pref == 'chromium' or (pref == 'auto' and web.Chromium.find(self.cfg.get('chromium', ''))):
-            return 'chromium'
-        return 'lite'
 
     def get_engine(self):
         with self.engine_lock:
@@ -350,42 +343,38 @@ class Browser(App):
 
     def _get_engine(self):
         if self.engine is None:
-            if self.engine_name == 'chromium':
-                try:
-                    self.engine = web.CDPEngine(self.cfg.get('chromium', ''))
-                except Exception as e:
-                    self.wm.loop.call_soon_threadsafe(lambda e=e: self.wm.toast('Chromium unavailable, using lite: %s' % e, 'red'))
-                    self.engine_name = 'lite'
-                    self.engine = web.LiteEngine()
-            else:
-                self.engine = web.LiteEngine()
+            self.engine = web.LiteEngine()
             self.engine.reader = self.reader
         return self.engine
 
     def proc_info(self):
-        return 'engine %s' % self.engine_name
+        return 'graphics mode (Chromium)' if self.gfx else 'text view (lite engine)'
 
     def reopen(self, url=None, **kw):
         if url:
             self.navigate(url)
 
     # ------------------------------------------------------------ navigation
-    def go_text(self, t):
+    def resolve(self, t):
+        """What was typed into an address bar -> URL ('' for nothing)."""
         t = t.strip()
-        self.addr_focus = False
         if not t:
-            return
+            return ''
         if t.startswith(('http://', 'https://', 'file://', 'about:')):
-            url = t
-        elif os.path.exists(os.path.expanduser(t)):
-            url = 'file://' + urllib.parse.quote(os.path.abspath(os.path.expanduser(t)))
-        elif re.match(r'^[\w-]+(\.[\w-]+)+(:\d+)?(/.*)?$', t) and ' ' not in t:
-            url = 'https://' + t
-        else:
-            url = self.cfg.get('search_url', 'https://html.duckduckgo.com/html/?q=%s') % urllib.parse.quote_plus(t)
-        self.navigate(url)
+            return t
+        if os.path.exists(os.path.expanduser(t)):
+            return 'file://' + urllib.parse.quote(os.path.abspath(os.path.expanduser(t)))
+        if re.match(r'^[\w-]+(\.[\w-]+)+(:\d+)?(/.*)?$', t) and ' ' not in t:
+            return 'https://' + t
+        return self.cfg.get('search_url', 'https://html.duckduckgo.com/html/?q=%s') % urllib.parse.quote_plus(t)
 
-    def navigate(self, url, data=None, record=True, action=None):
+    def go_text(self, t):
+        self.addr_focus = False
+        url = self.resolve(t)
+        if url:
+            self.navigate(url)
+
+    def navigate(self, url, data=None, record=True):
         if record and self.url and self.url != url:
             self.history.append((self.url, self.scroll))
             self.future = []
@@ -402,10 +391,7 @@ class Browser(App):
         target = url
 
         def work():
-            eng = self.get_engine()
-            if action:
-                return eng.action(*action)
-            return eng.load(target, data)
+            return self.get_engine().load(target, data)
 
         def done(doc):
             if doc is None or lid != self.load_id or self.win.closed:
@@ -434,8 +420,12 @@ class Browser(App):
         self.focus_idx = -1
         self.layout_key = None
         self.notice = ''
-        if doc.get('needs_js') and self.engine_name == 'lite':
-            self.notice = 'This page is mostly JavaScript - switch the engine to Chromium in the menu (==).'
+        if doc.get('needs_js'):
+            if web.Chromium.find(self.cfg.get('chromium', '')):
+                self.notice = 'This page is mostly JavaScript - Ctrl+G shows it in graphics mode.'
+            else:
+                self.notice = ('This page is mostly JavaScript - the graphics mode (Ctrl+G) '
+                               'needs Chromium: sudo apt install chromium')
         if self.url and not self.url.startswith('about:'):
             self.addr.set(self.url)
         self.set_title(clean(doc.get('title') or self.url or 'Browser')[:60])
@@ -459,16 +449,19 @@ class Browser(App):
     def home_doc(self):
         bm = self.cfg.get('bookmarks', [])
         blocks = [{'t': 'h', 'l': 1, 's': [{'x': 'monocell web'}]},
-                  {'t': 'p', 's': [{'x': 'Type an address or a search into the bar above (Ctrl+L). Engine: '},
-                                   {'x': self.engine_name, 'b': 1},
-                                   {'x': ' - switch in the menu.'}]},
+                  {'t': 'p', 's': [{'x': 'Type an address or a search into the bar above (Ctrl+L). '
+                                         'Pages are shown as text; '},
+                                   {'x': 'Ctrl+G', 'b': 1},
+                                   {'x': ' shows the real page (Chromium, JavaScript) in graphics mode.'}]},
                   {'t': 'h', 'l': 2, 's': [{'x': 'Bookmarks'}]}]
         for name, url in bm:
             blocks.append({'t': 'li', 'd': 1, 's': [{'x': name, 'h': url}, {'x': '  ' + url, 'c': 0}]})
         blocks.append({'t': 'h', 'l': 2, 's': [{'x': 'Keys'}]})
         for k in ('Ctrl+L address bar   Tab/Shift+Tab next/previous link   Enter open',
                   'Alt+Left/Right or Backspace history   Space/PgDn scroll   Ctrl+D bookmark   Ctrl+F find',
-                  'Click links, fields and buttons with the mouse; the wheel scrolls.'):
+                  'Click links, fields and buttons with the mouse; the wheel scrolls.',
+                  'Graphics mode: mouse and keyboard work as usual; Ctrl+G back, Ctrl+L address, '
+                  'Ctrl+O retro look, Alt+Left back.'):
             blocks.append({'t': 'p', 's': [{'x': k}]})
         return {'title': 'Home', 'url': HOME_URL, 'blocks': blocks}
 
@@ -532,12 +525,13 @@ class Browser(App):
         x += button(self, cv, x, 0, '<', 'back', enabled=bool(self.history)) + 1
         x += button(self, cv, x, 0, '>', 'fwd', enabled=bool(self.future)) + 1
         x += button(self, cv, x, 0, 'x' if self.loading else 'R', 'reload') + 1
-        aw = w - x - 12
+        aw = w - x - 18
         self.addr.draw(cv, x, 0, aw, th, focused and self.addr_focus)
         self.zone(x, 0, aw, 1, 'addr')
         self.addr_x = x
         bx = x + aw + 1
-        button(self, cv, bx, 0, 'Aa', 'reader', active=self.reader)
+        bx += button(self, cv, bx, 0, 'Aa', 'reader', active=self.reader) + 1
+        button(self, cv, bx, 0, 'Gfx', 'gfx', active=bool(self.gfx))
         button(self, cv, w - 5, 0, util.sym('menu', '=='), 'menu')
         x0, y0, cw, ch = self.content_geom(w, h)
         if self.doc is None:
@@ -597,7 +591,7 @@ class Browser(App):
             pct = ''
             if self.layout and len(self.layout.lines) > 8:
                 pct = '  %d%%' % (100 * self.scroll // max(1, len(self.layout.lines) - 1))
-            right = self.engine_name + pct
+            right = 'text' + pct
             cv.put(0, h - 1, fit(st, w - len(right) - 2), th.c('accent' if self.loading else 'dim', 'win'))
             cv.put(w - len(right), h - 1, right, th.c('dim', 'win'))
 
@@ -605,10 +599,8 @@ class Browser(App):
     def activate(self, tgt):
         if tgt[0] == 'link':
             href = tgt[1]
-            if not href or href.startswith('javascript:') or (self.engine_name == 'chromium' and tgt[2] and
-                                                              (href.endswith('#') or href == self.url + '#')):
-                if self.engine_name == 'chromium' and tgt[2]:
-                    self.navigate(self.url, record=True, action=('click', tgt[2]))
+            if not href or href.startswith('javascript:'):
+                self.wm.toast('A script link - Ctrl+G opens the page in graphics mode')
                 return
             if href.split('#')[0] == (self.url or '').split('#')[0] and '#' in href:
                 return
@@ -624,8 +616,6 @@ class Browser(App):
             elif k == 'check':
                 cur = self.values.get(wd['id'], wd.get('on'))
                 self.values[wd['id']] = not cur
-                if self.engine_name == 'chromium':
-                    self.navigate(self.url, record=False, action=('click', wd['id']))
             elif k == 'select':
                 opts = wd.get('opts', [])
                 items = [MenuItem(clean(o.get('x') or o.get('v') or '')[:40],
@@ -634,46 +624,19 @@ class Browser(App):
                     mx, my = self.wm.mouse_pos
                     self.wm.menu(items, mx, my + 1)
             elif k == 'button':
-                if self.engine_name == 'chromium':
-                    self.sync_values(then=('click', wd['id']))
-                elif wd.get('submit', True):
+                if wd.get('submit', True):
                     self.submit_form(wd)
 
     def choose(self, wd, o):
         self.values[wd['id']] = o.get('v') if o.get('v') is not None else o.get('x')
         self.values[('sel', wd['id'])] = o.get('x') or o.get('v')
         self.layout_key = None
-        if self.engine_name == 'chromium':
-            self.navigate(self.url, record=False, action=('select', wd['id'], self.values[wd['id']]))
 
     def submit_field(self, wd, text):
         self.values[wd['id']] = text
         self.edit = None
         self.layout_key = None
-        if self.engine_name == 'chromium':
-            self.sync_values(then=('submit', wd['id']))
-        else:
-            self.submit_form(wd)
-
-    def sync_values(self, then=None):
-        vals = {k: v for k, v in self.values.items() if isinstance(k, int)}
-        eng_action = then
-
-        def work():
-            eng = self.get_engine()
-            for wid, v in vals.items():
-                if isinstance(v, str):
-                    eng.action('set', wid, v)
-            return eng.action(*eng_action) if eng_action else None
-
-        def done(doc):
-            if doc:
-                if self.url:
-                    self.history.append((self.url, self.scroll))
-                self.show(doc)
-        self.loading = True
-        self.status = 'Working...'
-        self.thread(work, done)
+        self.submit_form(wd)
 
     def submit_form(self, wd):
         eng = self.get_engine()
@@ -700,8 +663,7 @@ class Browser(App):
         for name, url in self.cfg.get('bookmarks', [])[:12]:
             items.append(MenuItem(fit(name, 30).strip(), (lambda u=url: self.navigate(u))))
         items += [None,
-                  MenuItem('Engine: lite (fast, no JS)', lambda: self.switch_engine('lite'), checked=self.engine_name == 'lite'),
-                  MenuItem('Engine: Chromium (JS)', lambda: self.switch_engine('chromium'), checked=self.engine_name == 'chromium'),
+                  MenuItem('Graphics mode (Chromium, JS)', self.enter_gfx, 'Ctrl+G'),
                   MenuItem('Reader mode', self.toggle_reader, checked=self.reader),
                   MenuItem('Show images', self.toggle_images, checked=bool(self.cfg.get('web_images', True))),
                   MenuItem('Find in page', self.open_find, 'Ctrl+F'),
@@ -720,16 +682,29 @@ class Browser(App):
         self.cfg.save()
         self.layout_key = None
 
-    def switch_engine(self, name):
-        if name == self.engine_name:
+    # ------------------------------------------------------------ graphics mode
+    def enter_gfx(self):
+        if self.gfx:
             return
-        if self.engine:
-            eng = self.engine
-            self.thread(eng.close)
-        self.engine = None
-        self.engine_name = name
-        if self.url:
-            self.navigate(self.url, record=False)
+        from .webgfx import WebGfx
+        g = WebGfx(self, self.url)
+        self.gfx = g
+        if not g.start():
+            self.gfx = None
+
+    def leave_gfx(self):
+        g, self.gfx = self.gfx, None
+        if not g:
+            return
+        url = g.url
+        g.stop()
+        if url and url != 'about:blank' and url != self.url:
+            self.navigate(url)               # the text view follows the graphics mode
+        self.invalidate()
+
+    def gfx_idle(self):
+        if self.gfx:
+            self.gfx.idle()
 
     def open_find(self):
         self.find = TextField(placeholder='find in page', on_enter=lambda t: self.find_next())
@@ -747,6 +722,9 @@ class Browser(App):
         self.wm.toast('Not found')
 
     def on_close(self):
+        if self.gfx:
+            g, self.gfx = self.gfx, None
+            g.stop()
         if self.engine:
             eng = self.engine
             self.engine = None
@@ -754,8 +732,8 @@ class Browser(App):
                 eng.close()
             except Exception:
                 pass
-            if not any(isinstance(w.app, Browser) and w.app is not self for w in self.wm.windows):
-                web.shutdown_all()
+        if not any(isinstance(w.app, Browser) and w.app is not self for w in self.wm.windows):
+            web.shutdown_all()              # the headless browser is shared: last window wins
         return True
 
     # ------------------------------------------------------------ input
@@ -796,6 +774,8 @@ class Browser(App):
             self.menu()
         elif key == 'reader':
             self.toggle_reader()
+        elif key == 'gfx':
+            self.enter_gfx()
         elif key[0] == 'hit':
             li, hx0 = key[1], key[2]
             for x0, x1, tgt in self.layout.lines[li].hits:
@@ -808,6 +788,8 @@ class Browser(App):
                     break
 
     def on_mouse(self, ev):
+        if self.gfx:
+            return self.gfx.on_mouse(ev)
         g = getattr(self, 'sb', None)
         if ev.kind == 'up' and getattr(self, 'sb_grab', None) is not None:
             self.sb_grab = None
@@ -866,7 +848,12 @@ class Browser(App):
         return r
 
     def on_key(self, ev):
+        if self.gfx:
+            return self.gfx.on_key(ev)
         k = ev.key
+        if k == 'ctrl+g':
+            self.enter_gfx()
+            return True
         if self.addr_focus:
             if k == 'esc':
                 self.addr_focus = False

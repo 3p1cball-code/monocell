@@ -57,6 +57,8 @@ class Maps(App):
         self.last_render = 0.0
         self.renders = 0
         self.pipe_fails = 0
+        self.goriginal = False      # 'o': full resolution, full colour (this session only)
+        self.gzoff = 0              # zoom levels added for it (keeps the same area)
         self.every(0.04, self.tick_render)
         self.every(0.5, self.idle_tick)
         self.later(0.2, self.auto_gfx)
@@ -68,11 +70,14 @@ class Maps(App):
         look = fbmode.OLD_LOOKS.get(look, look)
         look = look if look in fbmode.LOOKS else 'vga'
         dither = cfg.get('gfx_dither', 'bayer')
-        return look, fbmode.SCALE, dither, bool(cfg.get('gfx_scanlines', False))
+        scale = 1 if self.goriginal else fbmode.SCALE
+        return look, scale, dither, bool(cfg.get('gfx_scanlines', False))
 
     def label(self):
         look, scale, dither, scan = self.settings()
         cw, ch = fbmode.canvas(self.gfx.screen, scale) if self.gfx else (0, 0)
+        if self.goriginal:
+            return '%s  %dX%d  FULL COLOUR' % (fbmode.ORIGINAL_LABEL, cw, ch)
         return '%s  %dX%d  %s%s' % (fbmode.LOOKS[look][0], cw, ch, dither,
                                     '  SCANLINES' if scan else '')
 
@@ -83,7 +88,7 @@ class Maps(App):
         cfg = self.wm.cfg
         cfg['map_lat'] = round(self.view.lat, 5)
         cfg['map_lon'] = round(self.view.lon, 5)
-        cfg['map_zoom'] = int(self.view.zoom)
+        cfg['map_zoom'] = max(1, int(self.view.zoom) - self.gzoff)
         cfg.save()
 
     def note(self, *lines, secs=3.0):
@@ -206,7 +211,7 @@ class Maps(App):
         self.gfx = sess
         self.wm.enter_gfx(self)
         self.set_borderless(True)
-        cw, ch = fbmode.canvas(sess.screen, fbmode.SCALE)
+        cw, ch = fbmode.canvas(sess.screen, self.settings()[1])
         self.view.resize(cw, ch)
         self.frame = None
         try:
@@ -215,7 +220,8 @@ class Maps(App):
             self.leave_gfx()
             self.wm.toast('Graphics mode: %s' % e, 'red')
             return
-        self.note('B SEARCH  +/- ZOOM  ARROWS PAN', 'C LOOK  D DITHER  S SCANLINES  G EXIT',
+        self.note('B SEARCH  +/- ZOOM  ARROWS PAN  O ORIGINAL',
+                  'C LOOK  D DITHER  S SCANLINES  G EXIT',
                   secs=5.0)
         self.request_render()
 
@@ -224,6 +230,7 @@ class Maps(App):
             return
         self.save_view()
         self.stop_pipe()
+        self.set_original(False, restart=False)     # one stay in graphics mode only
         sess, self.gfx = self.gfx, None
         sess.close()
         self.wm.leave_gfx()
@@ -241,8 +248,8 @@ class Maps(App):
         self.pipe = fbmode.StillPipeline(
             (cw, ch), g.fb, theme_rgb=self.th.rgb,
             accent=self.th.rgb[self.th.r['accent']], look=look, scale=scale,
-            dither=dither, scanlines=scan, vga_palette=pal, bayer_scale=MAP_BAYER)
-        g.scale = scale
+            dither=dither, scanlines=scan, vga_palette=pal, bayer_scale=MAP_BAYER,
+            original=self.goriginal)
 
     def stop_pipe(self):
         if self.pipe:
@@ -321,7 +328,7 @@ class Maps(App):
         info = 'Z%d %s' % (self.view.zoom, maps.fmt_latlon(self.view.lat, self.view.lon))
         x = self.text(buf, x, ty, info, px, g.c_fg) + 2 * px
         m, length = maps.scale_bar(self.view.mpp(),
-                                   target=max(40, W // 16 // fbmode.SCALE))
+                                   target=max(40, W // 16 // self.settings()[1]))
         if x + length * px + 8 * 4 * px < W:
             self.rect(buf, x, ty + 4 * px, length * px, px, g.c_fg)
             self.rect(buf, x, ty + 3 * px, px, 3 * px, g.c_fg)
@@ -459,6 +466,10 @@ class Maps(App):
             return True
         if k in ('g', 'esc', 'q'):
             self.leave_gfx()
+        elif k == 'o':
+            self.set_original(not self.goriginal)
+            self.note('O: BACK TO THE LOOK' if self.goriginal else 'O: ORIGINAL')
+            self.request_render()
         elif k == 'c':
             self.change('gfx_look', fbmode.LOOK_ORDER)
         elif k == 'd':
@@ -473,14 +484,9 @@ class Maps(App):
             self.zoom(1)
         elif k == '-':
             self.zoom(-1)
-        elif k == 'up':
-            self.pan(0, -PAN_PIXELS)
-        elif k == 'down':
-            self.pan(0, PAN_PIXELS)
-        elif k == 'left':
-            self.pan(-PAN_PIXELS, 0)
-        elif k == 'right':
-            self.pan(PAN_PIXELS, 0)
+        elif k in ('up', 'down', 'left', 'right'):
+            d = PAN_PIXELS * fbmode.SCALE // self.settings()[1]   # same distance on screen
+            self.pan(*{'up': (0, -d), 'down': (0, d), 'left': (-d, 0), 'right': (d, 0)}[k])
         elif k in ('home', 'h'):
             self.goto_berlin()
         elif k == 'r':
@@ -499,6 +505,8 @@ class Maps(App):
         cfg[key] = values[(values.index(cur) + 1) % len(values)] if cur in values \
             else values[0]
         cfg.save()
+        if self.goriginal:                  # a look key means: show me the look
+            self.set_original(False, restart=False)
         try:
             self.start_pipe()
         except OSError as e:
@@ -506,6 +514,27 @@ class Maps(App):
             return
         self.note(fbmode.LOOKS[self.settings()[0]][2] if key == 'gfx_look' else None)
         self.request_render()
+
+    def set_original(self, on, restart=True):
+        """Full resolution, full colour - or back to the look. The map keeps the same
+        area: four times the pixels are two tile zoom levels."""
+        if on == self.goriginal:
+            return
+        self.goriginal = on
+        if on:
+            z0 = self.view.zoom
+            self.view.zoom_by(2)
+            self.gzoff = self.view.zoom - z0
+        else:
+            self.view.zoom_by(-self.gzoff)
+            self.gzoff = 0
+        if self.gfx:
+            self.view.resize(*fbmode.canvas(self.gfx.screen, self.settings()[1]))
+            if restart:
+                try:
+                    self.start_pipe()
+                except OSError as e:
+                    self.err = str(e)
 
     def cycle_source(self):
         key = self.wm.cfg.get('map_tiles', maps.DEFAULT_SOURCE)
@@ -561,8 +590,8 @@ class Maps(App):
             return super().on_mouse(ev)
         g = self.gfx
         term = self.wm.term
-        sx = g.screen[0] / float(max(1, term.cols))
-        sy = g.screen[1] / float(max(1, term.rows))
+        sx = g.screen[0] / float(max(1, term.w))
+        sy = g.screen[1] / float(max(1, term.h))
         x, y = ev.x * sx, ev.y * sy
         if ev.kind == 'wheelup':
             self.zoom(1)
@@ -577,7 +606,7 @@ class Maps(App):
         if ev.kind in ('drag', 'move') and self.drag:
             lx, ly = self.drag
             self.drag = (x, y)
-            s = fbmode.SCALE
+            s = self.settings()[1]
             if abs(x - lx) >= s * 0.5 or abs(y - ly) >= s * 0.5:
                 self.pan(-(x - lx) / s, -(y - ly) / s)
             return True

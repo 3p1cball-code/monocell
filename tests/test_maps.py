@@ -361,5 +361,31 @@ class TestStillPipeline(unittest.TestCase):
         self.assertEqual(cv, (W // 4, H // 4))
 
 
+
+class TestOriginalMode(unittest.TestCase):
+    """'o' in the map app: full resolution, but the same area on screen."""
+
+    def app(self, zoom):
+        from monocell.apps.maps import Maps
+        a = Maps.__new__(Maps)
+        a.view = maps.MapView(52.5, 13.4, zoom, 256, 192)
+        a.goriginal, a.gzoff, a.gfx = False, 0, None
+        return a
+
+    def test_two_zoom_levels_up_and_back(self):
+        a = self.app(12)
+        a.set_original(True)
+        self.assertEqual((a.view.zoom, a.gzoff), (14, 2))
+        a.set_original(False)
+        self.assertEqual((a.view.zoom, a.gzoff), (12, 0))
+
+    def test_zoom_limit_is_remembered(self):
+        a = self.app(18)
+        a.set_original(True)
+        self.assertEqual((a.view.zoom, a.gzoff), (19, 1))
+        a.set_original(False)
+        self.assertEqual(a.view.zoom, 18)
+
+
 if __name__ == '__main__':
     unittest.main()

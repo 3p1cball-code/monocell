@@ -47,6 +47,7 @@ class Viewer(App):
         self.gpipe_fails = 0
         self.gdrag = None
         self.gchrome = True        # chrome state to go back to
+        self.goriginal = False     # 'o': full resolution, full colour (this session only)
         if path:
             self.open(path)
         self.every(0.04, self.gfx_tick)
@@ -294,12 +295,14 @@ class Viewer(App):
         look = cfg.get('gfx_look', 'vga')
         look = fbmode.OLD_LOOKS.get(look, look)
         look = look if look in fbmode.LOOKS else 'vga'
-        return look, fbmode.SCALE, cfg.get('gfx_dither', 'bayer'), \
+        return look, 1 if self.goriginal else fbmode.SCALE, cfg.get('gfx_dither', 'bayer'), \
             bool(cfg.get('gfx_scanlines', False))
 
     def gfx_label(self):
         look, scale, dither, scan = self.gfx_settings()
         cw, ch = fbmode.canvas(self.gfx.screen, scale) if self.gfx else (0, 0)
+        if self.goriginal:
+            return '%s  %dX%d  FULL COLOUR' % (fbmode.ORIGINAL_LABEL, cw, ch)
         return '%s  %dX%d  %s%s' % (fbmode.LOOKS[look][0], cw, ch, dither,
                                     '  SCANLINES' if scan else '')
 
@@ -344,6 +347,7 @@ class Viewer(App):
         self.wm.enter_gfx(self)
         self.gzoom = 1.0
         self.gpanx = self.gpany = 0
+        self.goriginal = False
         try:
             self.start_pipe()
         except OSError as e:
@@ -351,7 +355,7 @@ class Viewer(App):
             self.wm.toast('Graphics mode: %s' % e, 'red')
             return
         tuning = self.tune_palette()
-        self.gfx_note('G EXIT  C LOOK  D DITHER  S SCANLINES  +/- ZOOM  N/P NEXT',
+        self.gfx_note('G EXIT  O ORIGINAL  C LOOK  D DITHER  S SCANLINES  +/- ZOOM  N/P NEXT',
                       'TUNING THE PALETTE...' if tuning else None, secs=5.0)
         self.gfx_request()
 
@@ -382,8 +386,7 @@ class Viewer(App):
         self.pipe = fbmode.StillPipeline(
             (cw, ch), g.fb, theme_rgb=self.th.rgb,
             accent=self.th.rgb[self.th.r['accent']], look=look, scale=scale,
-            dither=dither, scanlines=scan, vga_palette=pal)
-        g.scale = scale
+            dither=dither, scanlines=scan, vga_palette=pal, original=self.goriginal)
 
     def stop_pipe(self):
         if self.pipe:
@@ -437,7 +440,7 @@ class Viewer(App):
 
     # ------------------------------------------------------------ graphics drawing
     def gfx_canvas(self):
-        return fbmode.canvas(self.gfx.screen, fbmode.SCALE)
+        return fbmode.canvas(self.gfx.screen, self.gfx_settings()[1])
 
     def gfx_picture(self):
         """The canvas: the picture fitted or zoomed, on black (no UI chrome)."""
@@ -544,6 +547,8 @@ class Viewer(App):
         k = ev.key
         if k in ('g', 'esc', 'f'):
             self.leave_gfx()
+        elif k == 'o':
+            self.gfx_original()
         elif k == 'c':
             self.gfx_change('gfx_look', fbmode.LOOK_ORDER)
         elif k == 'd':
@@ -568,23 +573,42 @@ class Viewer(App):
             if self.gzoom <= 1:
                 self.step(1)
             else:
-                self.gpanx += 16
+                self.gpanx += self.gfx_step()
                 self.gfx_request()
         elif k == 'left':
             if self.gzoom <= 1:
                 self.step(-1)
             else:
-                self.gpanx -= 16
+                self.gpanx -= self.gfx_step()
                 self.gfx_request()
         elif k == 'up':
-            self.gpany -= 16
+            self.gpany -= self.gfx_step()
             self.gfx_request()
         elif k == 'down':
-            self.gpany += 16
+            self.gpany += self.gfx_step()
             self.gfx_request()
         else:
             return False
         return True
+
+    def gfx_step(self):
+        """Arrow-key pan in canvas pixels: the same distance on screen in both modes."""
+        return 16 * fbmode.SCALE // self.gfx_settings()[1]
+
+    def gfx_original(self):
+        """'o': the original picture at full resolution and colour, or back to the look."""
+        k = fbmode.SCALE
+        self.goriginal = not self.goriginal
+        f = k if self.goriginal else 1.0 / k     # keep the pan on the same spot
+        self.gpanx *= f
+        self.gpany *= f
+        try:
+            self.start_pipe()
+        except OSError as e:
+            log('viewer gfx: %s' % e)
+            return
+        self.gfx_note('O: BACK TO THE LOOK' if self.goriginal else 'O: ORIGINAL')
+        self.gfx_request()
 
     def gfx_change(self, key, values):
         cfg = self.wm.cfg
@@ -594,6 +618,10 @@ class Viewer(App):
         cfg[key] = values[(values.index(cur) + 1) % len(values)] if cur in values \
             else values[0]
         cfg.save()
+        if self.goriginal:                  # a look key means: show me the look
+            self.goriginal = False
+            self.gpanx /= fbmode.SCALE
+            self.gpany /= fbmode.SCALE
         try:
             self.start_pipe()
         except OSError as e:
@@ -607,8 +635,8 @@ class Viewer(App):
     def gfx_mouse(self, ev):
         g = self.gfx
         term = self.wm.term
-        sx = g.screen[0] / float(max(1, term.cols))
-        sy = g.screen[1] / float(max(1, term.rows))
+        sx = g.screen[0] / float(max(1, term.w))
+        sy = g.screen[1] / float(max(1, term.h))
         x, y = ev.x * sx, ev.y * sy
         if ev.kind == 'wheelup':
             self.gzoom = min(16.0, self.gzoom * 1.25)
@@ -620,7 +648,7 @@ class Viewer(App):
         elif ev.kind in ('drag', 'move') and self.gdrag:
             lx, ly = self.gdrag
             self.gdrag = (x, y)
-            s = fbmode.SCALE
+            s = self.gfx_settings()[1]
             if abs(x - lx) >= s * 0.5 or abs(y - ly) >= s * 0.5:
                 self.gpanx -= (x - lx) / s
                 self.gpany -= (y - ly) / s

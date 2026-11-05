@@ -300,6 +300,14 @@ class MiceReader:
         self.buttons = 0
         self.pending = b''
         self.speed = 0.12
+        # graphics mode: positions as fractional cells, every movement reported
+        # (a cell is 9x16 pixels - far too coarse to hit a link on a web page)
+        self.fine = False
+
+    def set_fine(self, on):
+        self.fine = bool(on)
+        if not on:
+            self.fx, self.fy = float(int(self.fx)), float(int(self.fy))
 
     def read(self):
         out = []
@@ -323,10 +331,12 @@ class MiceReader:
                 if dz > 7 or dz < -8:   # not really IMPS/2
                     self.wheel = False
                     dz = 0
-            ox, oy = int(self.fx), int(self.fy)
-            self.fx = max(0, min(self.cols - 1, self.fx + dx * self.speed))
-            self.fy = max(0, min(self.rows - 1, self.fy - dy * self.speed * 0.5))
-            x, y = int(self.fx), int(self.fy)
+            fine = self.fine
+            ox, oy = (self.fx, self.fy) if fine else (int(self.fx), int(self.fy))
+            top = 0.001 if fine else 1           # fine: right up to the last pixel
+            self.fx = max(0, min(self.cols - top, self.fx + dx * self.speed))
+            self.fy = max(0, min(self.rows - top, self.fy - dy * self.speed * 0.5))
+            x, y = (self.fx, self.fy) if fine else (int(self.fx), int(self.fy))
             btns = b0 & 7
             for bit, bn in ((1, 0), (4, 1), (2, 2)):
                 if (btns & bit) and not (self.buttons & bit):

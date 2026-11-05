@@ -1,8 +1,8 @@
 """Web engines for the Browser app.
 
-lite     : urllib + html.parser (no JavaScript; fast, works everywhere)
-chromium : headless Chromium/Brave driven over the DevTools protocol (JS, SPAs); the DOM is
-           extracted into the same block model, so both engines share one text layout.
+lite  : urllib + html.parser (no JavaScript; fast, works everywhere) - the text view
+Page  : headless Chromium/Brave driven over the DevTools protocol, as pixels - the
+        graphics mode for pages that need JavaScript
 
 Document model:  {'title', 'url', 'blocks': [...]}
   block: {'t': 'p'|'h'|'li'|'q'|'pre'|'hr'|'img'|'table', ...}
@@ -545,95 +545,14 @@ def _mask(data, mask):
     return (int.from_bytes(data, 'big') ^ int.from_bytes(m, 'big')).to_bytes(n, 'big')
 
 
-EXTRACT_JS = r"""
-(() => {
-  const READER = __READER__;
-  const JUNK = /(^|[-_ ])(nav|navbar|navbox|menu|sidebar|footer|cookie|consent|banner|share|social|toc|mw-editsection|noprint|breadcrumb|skip|related|advert|ads?|promo|newsletter|vector-|mw-jump)([-_ ]|$)/i;
-  const out = []; let cur = null; let wid = 0;
-  const SKIP = new Set(['SCRIPT','STYLE','NOSCRIPT','TEMPLATE','SVG','HEAD','IFRAME','CANVAS','OBJECT','EMBED','VIDEO','AUDIO','MATH','DIALOG']);
-  const BLOCK = new Set(['P','DIV','SECTION','ARTICLE','MAIN','HEADER','FOOTER','NAV','ASIDE','FORM','FIGURE','FIGCAPTION','DL','DT','DD','ADDRESS','DETAILS','SUMMARY','FIELDSET','TR','TABLE','TBODY','CENTER','LABEL','LEGEND','CAPTION']);
-  const flush = () => { if (cur && cur.s.some(x => x.w || x.x.trim())) out.push(cur); cur = null; };
-  const ensure = (st) => { if (!cur) cur = {t: st.q ? 'q' : 'p', s: []}; return cur; };
-  const reg = (el) => { wid++; el.setAttribute('data-twid', String(wid)); return wid; };
-  const hidden = (el) => { const cs = getComputedStyle(el); return cs.display === 'none' || cs.visibility === 'hidden' || (cs.opacity === '0' && el.tagName !== 'INPUT') || el.getAttribute('aria-hidden') === 'true' && !el.querySelector('a,input,button'); };
-  const span = (st, text) => { const s = {x: text}; if (st.h) { s.h = st.h; s.id = st.lid; } if (st.b) s.b = 1; if (st.i) s.i = 1; if (st.c) s.c = 1; ensure(st).s.push(s); };
-  const dataTable = (t) => t.querySelector('th') && !t.querySelector('table') && t.rows.length < 300;
-  function walk(n, st) {
-    if (n.nodeType === 3) { let t = n.textContent.replace(/\s+/g, ' '); if (!t || (t === ' ' && (!cur || !cur.s.length))) return; span(st, t); return; }
-    if (n.nodeType !== 1) return;
-    const tag = n.tagName.toUpperCase();
-    if (SKIP.has(tag)) return;
-    if (hidden(n)) return;
-    if (READER && n !== root) {
-      if (['NAV','ASIDE','FOOTER'].includes(tag)) return;
-      const role = n.getAttribute('role') || '';
-      if (['navigation','banner','contentinfo','complementary','search'].includes(role)) return;
-      const cid = ((typeof n.className === 'string' ? n.className : '') + ' ' + (n.id || ''));
-      if (cid && JUNK.test(cid) && !n.querySelector('h1')) return;
-    }
-    if (n.shadowRoot) { for (const c of n.shadowRoot.childNodes) walk(c, st); }
-    if (tag === 'A') { st = Object.assign({}, st, {h: n.href || null, lid: reg(n)}); }
-    else if (tag === 'B' || tag === 'STRONG') st = Object.assign({}, st, {b: 1});
-    else if (tag === 'I' || tag === 'EM') st = Object.assign({}, st, {i: 1});
-    else if (tag === 'CODE' || tag === 'KBD' || tag === 'SAMP') st = Object.assign({}, st, {c: 1});
-    if (/^H[1-6]$/.test(tag)) { flush(); cur = {t: 'h', l: +tag[1], s: []}; for (const c of n.childNodes) walk(c, st); flush(); return; }
-    if (tag === 'UL' || tag === 'OL') { flush(); const d = (st.d || 0) + 1; let i = 0;
-      for (const c of n.children) { if (c.tagName === 'LI') { if (hidden(c)) continue; i++; flush(); cur = {t: 'li', d: d, n: tag === 'OL' ? i : null, s: []};
-        for (const cc of c.childNodes) walk(cc, Object.assign({}, st, {d: d})); flush(); } else walk(c, Object.assign({}, st, {d: d})); }
-      flush(); return; }
-    if (tag === 'PRE') { flush(); out.push({t: 'pre', x: n.innerText}); return; }
-    if (tag === 'HR') { flush(); out.push({t: 'hr'}); return; }
-    if (tag === 'BR') { span(st, '\n'); return; }
-    if (tag === 'BLOCKQUOTE') { flush(); for (const c of n.childNodes) walk(c, Object.assign({}, st, {q: 1})); flush(); return; }
-    if (tag === 'TABLE' && dataTable(n)) { flush(); const rows = [...n.rows].map(r => [...r.cells].map(c => c.innerText.replace(/\s+/g, ' ').trim()));
-      out.push({t: 'table', rows: rows.filter(r => r.some(c => c))}); return; }
-    if (tag === 'IMG' || tag === 'PICTURE') {
-      const img = tag === 'IMG' ? n : n.querySelector('img'); if (!img) return;
-      const r = img.getBoundingClientRect(); const src = img.currentSrc || img.src;
-      if (src && r.width >= 48 && r.height >= 32) { flush(); out.push({t: 'img', src: src, alt: img.alt || '', w: Math.round(r.width), h: Math.round(r.height), href: st.h || null, id: st.lid}); }
-      else if (img.alt && r.width >= 16) span(st, '[' + img.alt + ']');
-      return; }
-    if (tag === 'INPUT') { const t = (n.type || 'text').toLowerCase(); if (t === 'hidden') return;
-      if (['submit','button','image','reset'].includes(t)) { ensure(st).s.push({w: 'button', id: reg(n), x: n.value || n.alt || 'Submit'}); return; }
-      if (t === 'checkbox' || t === 'radio') { ensure(st).s.push({w: 'check', id: reg(n), on: n.checked, radio: t === 'radio'}); return; }
-      ensure(st).s.push({w: 'input', id: reg(n), val: n.value || '', ph: n.placeholder || n.getAttribute('aria-label') || '', pw: t === 'password'}); return; }
-    if (tag === 'TEXTAREA') { ensure(st).s.push({w: 'input', id: reg(n), val: n.value || '', ph: n.placeholder || '', multi: 1}); return; }
-    if (tag === 'SELECT') { const o = n.options[n.selectedIndex]; ensure(st).s.push({w: 'select', id: reg(n), x: o ? o.text : '', opts: [...n.options].map(o => ({v: o.value, x: o.text}))}); return; }
-    if (tag === 'BUTTON' || n.getAttribute('role') === 'button' && !n.querySelector('a,button')) { const t = n.innerText.replace(/\s+/g, ' ').trim() || n.getAttribute('aria-label') || '';
-      if (t) { ensure(st).s.push({w: 'button', id: reg(n), x: t.slice(0, 40)}); } return; }
-    if (tag === 'TR') { flush(); let ci = 0; for (const c of n.children) { if (ci++) span(st, ' '); walk(c, Object.assign({}, st, {td: 0})); } flush(); return; }
-    if (tag === 'TD' || tag === 'TH') { const s2 = Object.assign({}, st, {td: 1}); for (const c of n.childNodes) walk(c, s2); return; }
-    const isBlock = BLOCK.has(tag) || (getComputedStyle(n).display || '').match(/^(block|flex|grid|list-item|table)/);
-    if (isBlock && !st.td) flush();
-    for (const c of n.childNodes) walk(c, st);
-    if (isBlock && !st.td) flush();
-  }
-  let root = document.body;
-  if (READER) {
-    for (const sel of ['#mw-content-text', 'article', 'main', '[role=main]', '#content', '#main', '.post', '.article']) {
-      const c = document.querySelector(sel);
-      if (c && c.innerText && c.innerText.length > 300) { root = c; break; }
-    }
-    const h1 = document.querySelector('h1');
-    if (root !== document.body && h1 && !root.contains(h1)) { out.push({t: 'h', l: 1, s: [{x: h1.innerText.trim()}]}); }
-  }
-  walk(root, {});
-  flush();
-  return JSON.stringify({title: document.title, url: location.href, blocks: out});
-})()
-"""
-
-
-# Requests the text view never needs; on slow machines they cost most of the load time.
-BLOCKED_URLS = [
-    '*.woff', '*.woff2', '*.ttf', '*.otf', '*.eot',
-    '*.mp4', '*.webm', '*.m3u8', '*.mp3', '*.ogg', '*.m4a',
+# Requests nobody misses: ads, trackers and consent scripts. On a slow machine they
+# cost most of the load time (fonts and pictures are wanted: this is a real view).
+AD_URLS = [
     '*doubleclick.net*', '*googlesyndication.com*', '*google-analytics.com*', '*googletagmanager.com*',
     '*googleadservices.com*', '*adservice.google.*', '*connect.facebook.net*', '*facebook.com/tr*',
     '*hotjar.com*', '*criteo.*', '*taboola.com*', '*outbrain.com*', '*amazon-adsystem.com*',
     '*scorecardresearch.com*', '*adnxs.com*', '*pubmatic.com*', '*rubiconproject.com*',
     '*moatads.com*', '*chartbeat.*', '*newrelic.com*', '*nr-data.net*', '*sentry.io*',
-    '*cookielaw.org*', '*onetrust.com*', '*usercentrics.eu*', '*consensu.org*',
 ]
 
 
@@ -660,7 +579,7 @@ class Chromium:
     def __init__(self, binary=''):
         exe = self.find(binary)
         if not exe:
-            raise RuntimeError('no Chromium/Brave found (set it in Settings > Web or use the lite engine)')
+            raise RuntimeError('no Chromium/Brave found (install chromium or set it in Settings > Web)')
         self.dir = os.path.join(CACHE_DIR, 'chromium-profile')
         os.makedirs(self.dir, exist_ok=True)
         port_file = os.path.join(self.dir, 'DevToolsActivePort')
@@ -680,8 +599,8 @@ class Chromium:
             pass
         args = [exe, '--headless=new', '--remote-debugging-port=0', '--remote-allow-origins=*',
                 '--user-data-dir=' + self.dir, '--no-first-run', '--no-default-browser-check', '--disable-gpu',
-                '--mute-audio', '--window-size=1200,1600', '--disable-extensions', '--hide-scrollbars',
-                '--blink-settings=imagesEnabled=true',
+                '--mute-audio', '--window-size=1024,768', '--disable-extensions',
+                '--autoplay-policy=user-gesture-required',
                 # without a desktop session the keyring lookup blocks the first request for the
                 # 25 s D-Bus timeout; cookies are encrypted with the built-in key instead
                 '--password-store=basic',
@@ -750,128 +669,320 @@ class Chromium:
             pass
 
 
-class CDPEngine:
-    name = 'chromium'
+# Runs in every document before its own scripts: keeps popups in this one tab (a
+# headless browser has no second window to show) and reports focus, link under the
+# pointer and title through the __mc binding.
+PAGE_JS = r"""
+(() => {
+  if (window.__mcHooked) return; window.__mcHooked = 1;
+  const send = (k, v) => { try { window.__mc(JSON.stringify({k: k, v: v})); } catch (e) {} };
+  window.open = function (u) { if (u) location.href = u; return window; };
+  document.addEventListener('click', e => {
+    const a = e.target && e.target.closest && e.target.closest('a[target]');
+    if (a) a.target = '_self';
+  }, true);
+  const editing = () => {
+    let e = document.activeElement;
+    while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement;
+    if (!e) return false;
+    const t = e.tagName, ty = (e.type || '').toLowerCase();
+    return !!(e.isContentEditable || t === 'TEXTAREA' || t === 'SELECT' || t === 'IFRAME' ||
+      t === 'EMBED' || t === 'OBJECT' ||
+      (t === 'INPUT' && !/^(button|submit|checkbox|radio|reset|image|range|color|file|hidden)$/.test(ty)));
+  };
+  let last = null;
+  const focus = () => { const v = editing(); if (v !== last) { last = v; send('edit', v); } };
+  document.addEventListener('focusin', focus, true);
+  document.addEventListener('focusout', () => setTimeout(focus, 0), true);
+  let hov = '';
+  document.addEventListener('mouseover', e => {
+    const a = e.target && e.target.closest && e.target.closest('a[href]');
+    const h = a ? a.href : '';
+    if (h !== hov) { hov = h; send('hover', h); }
+  }, true);
+  const title = () => send('title', document.title || '');
+  window.addEventListener('DOMContentLoaded', () => { title(); focus(); });
+  window.addEventListener('load', title);
+  window.addEventListener('hashchange', title);
+  window.addEventListener('popstate', () => setTimeout(title, 50));
+})();
+"""
 
-    def __init__(self, binary=''):
+COPY_JS = r"""(() => {
+  const e = document.activeElement;
+  if (e && (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA') && e.selectionStart != null)
+    return e.value.slice(e.selectionStart, e.selectionEnd);
+  return String(window.getSelection() || '');
+})()"""
+
+BLUR_JS = r"""(() => { let e = document.activeElement;
+  if (e && e.blur) e.blur(); return 1; })()"""
+
+# monocell key name -> (DOM key, windows virtual key code, text it types)
+SPECIAL_KEYS = {
+    'enter': ('Enter', 13, '\r'), 'tab': ('Tab', 9, ''), 'backspace': ('Backspace', 8, ''),
+    'esc': ('Escape', 27, ''), 'space': (' ', 32, ' '), ' ': (' ', 32, ' '),
+    'up': ('ArrowUp', 38, ''), 'down': ('ArrowDown', 40, ''), 'left': ('ArrowLeft', 37, ''),
+    'right': ('ArrowRight', 39, ''), 'home': ('Home', 36, ''), 'end': ('End', 35, ''),
+    'pgup': ('PageUp', 33, ''), 'pgdn': ('PageDown', 34, ''), 'insert': ('Insert', 45, ''),
+    'delete': ('Delete', 46, ''),
+}
+for _i in range(1, 13):
+    SPECIAL_KEYS['f%d' % _i] = ('F%d' % _i, 111 + _i, '')
+PUNCT_VK = {';': 186, '=': 187, ',': 188, '-': 189, '.': 190, '/': 191, '`': 192,
+            '[': 219, '\\': 220, ']': 221, "'": 222}
+MOD_BITS = {'alt': 1, 'ctrl': 2, 'meta': 4, 'shift': 8}
+
+
+def split_key(name):
+    """'ctrl+shift+left' -> ({'ctrl', 'shift'}, 'left'); '+' and 'ctrl++' stay intact."""
+    mods = set()
+    while True:
+        for m in MOD_BITS:
+            if name.startswith(m + '+') and len(name) > len(m) + 1:
+                mods.add(m)
+                name = name[len(m) + 1:]
+                break
+        else:
+            return mods, name
+
+
+def key_events(name):
+    """Input.dispatchKeyEvent parameters (down, up) for one monocell key, [] if unknown."""
+    mods, base = split_key(name)
+    bits = sum(MOD_BITS[m] for m in mods)
+    if base in SPECIAL_KEYS:
+        key, vk, text = SPECIAL_KEYS[base]
+        code = 'Space' if key == ' ' else key
+    elif len(base) == 1:
+        key, text = base, base
+        if base.isalpha() and base.isascii():
+            vk, code = ord(base.upper()), 'Key' + base.upper()
+            if 'shift' in mods:
+                key = text = base.upper()
+        elif base.isdigit():
+            vk, code = ord(base), 'Digit' + base
+        else:
+            vk, code = PUNCT_VK.get(base, 0), ''
+    else:
+        return []
+    if mods & {'ctrl', 'alt', 'meta'}:
+        text = ''                               # a shortcut, nothing is typed
+    down = {'type': 'keyDown' if text else 'rawKeyDown', 'key': key, 'code': code,
+            'windowsVirtualKeyCode': vk, 'nativeVirtualKeyCode': vk, 'modifiers': bits}
+    if text:
+        down['text'] = down['unmodifiedText'] = text
+    up = {'type': 'keyUp', 'key': key, 'code': code, 'windowsVirtualKeyCode': vk,
+          'nativeVirtualKeyCode': vk, 'modifiers': bits}
+    return [down, up]
+
+
+class Page:
+    """One headless Chromium tab, seen as pixels: the graphics mode of the browser.
+
+    Frames come by themselves (Page.startScreencast: only when something on the page
+    changed), input goes in as real mouse and key events. A reader thread owns the
+    socket: replies wake the calling thread, events go to `on_event(name, params)` -
+    which runs on that reader thread and must never call() (that would wait for
+    itself); send() is fine there.
+    """
+
+    def __init__(self, binary='', size=(1024, 748), on_event=None):
         self.browser = Chromium.get(binary)
         t = self.browser.new_target()
         self.tid = t['id']
         self.ws = WebSocket(t['webSocketDebuggerUrl'])
+        self.ws.sock.settimeout(None)
+        self.on_event = on_event or (lambda name, params: None)
         self.mid = 0
         self.lock = threading.Lock()
+        self.waiting = {}
+        self.dead = ''
+        self.closed = False
+        self.size = size
+        self.cast = None
+        self.main_frame = None
+        self.reader = threading.Thread(target=self._read, name='cdp-reader', daemon=True)
+        self.reader.start()
         self.call('Page.enable')
         self.call('Runtime.enable')
-        self.call('Emulation.setDeviceMetricsOverride', {'width': 1200, 'height': 1600, 'deviceScaleFactor': 1,
-                                                         'mobile': False})
+        self.call('Runtime.addBinding', {'name': '__mc'})
+        self.call('Page.addScriptToEvaluateOnNewDocument', {'source': PAGE_JS})
         try:
             self.call('Network.enable')
-            self.call('Network.setBlockedURLs', {'urls': BLOCKED_URLS})
+            self.call('Network.setBlockedURLs', {'urls': AD_URLS})
         except RuntimeError:
             pass
+        try:
+            self.call('Emulation.setFocusEmulationEnabled', {'enabled': True})
+        except RuntimeError:
+            pass
+        self.resize(*size)
+        try:
+            self.main_frame = self.call('Page.getFrameTree')['frameTree']['frame']['id']
+        except (RuntimeError, KeyError, TypeError):
+            pass
 
-    def call(self, method, params=None, timeout=30):
+    # ---------------------------------------------------------- protocol
+    def _read(self):
+        while not self.closed:
+            try:
+                msg = json.loads(self.ws.recv())
+            except Exception as e:                 # socket closed, browser gone
+                self.dead = str(e) or 'connection lost'
+                break
+            if 'id' in msg:
+                w = self.waiting.pop(msg['id'], None)
+                if w:
+                    w[1].append(msg)
+                    w[0].set()
+                continue
+            name, params = msg.get('method', ''), msg.get('params', {})
+            if name == 'Page.javascriptDialogOpening':
+                # alert/confirm/prompt would stop the page: answer at once
+                self.send('Page.handleJavaScriptDialog',
+                          {'accept': True, 'promptText': params.get('defaultPrompt', '')})
+            try:
+                self.on_event(name, params)
+            except Exception:
+                pass
+        for ev, box in list(self.waiting.values()):
+            ev.set()
+        if not self.closed:
+            try:
+                self.on_event('closed', {'reason': self.dead})
+            except Exception:
+                pass
+
+    def _next(self):
         with self.lock:
             self.mid += 1
-            mid = self.mid
-            self.ws.send(json.dumps({'id': mid, 'method': method, 'params': params or {}}))
-            self.ws.sock.settimeout(timeout)
-            while True:
-                msg = json.loads(self.ws.recv())
-                if msg.get('id') == mid:
-                    if 'error' in msg:
-                        raise RuntimeError(msg['error'].get('message', 'CDP error'))
-                    return msg.get('result', {})
+            return self.mid
 
-    def evaluate(self, js, timeout=30):
-        r = self.call('Runtime.evaluate', {'expression': js, 'returnByValue': True, 'awaitPromise': True}, timeout)
+    def send(self, method, params=None):
+        """Fire and forget (mouse moves, frame acks): no waiting for the reply."""
+        if self.dead or self.closed:
+            return
+        try:
+            self.ws.send(json.dumps({'id': self._next(), 'method': method, 'params': params or {}}))
+        except OSError as e:
+            self.dead = str(e)
+
+    def call(self, method, params=None, timeout=20):
+        if self.dead:
+            raise RuntimeError(self.dead)
+        mid = self._next()
+        ev, box = threading.Event(), []
+        self.waiting[mid] = (ev, box)
+        try:
+            self.ws.send(json.dumps({'id': mid, 'method': method, 'params': params or {}}))
+        except OSError as e:
+            self.waiting.pop(mid, None)
+            raise RuntimeError(str(e))
+        if not ev.wait(timeout):
+            self.waiting.pop(mid, None)
+            raise RuntimeError('%s: no answer' % method)
+        if not box:
+            raise RuntimeError(self.dead or 'connection lost')
+        msg = box[0]
+        if 'error' in msg:
+            raise RuntimeError(msg['error'].get('message', 'CDP error'))
+        return msg.get('result', {})
+
+    def evaluate(self, js, timeout=20):
+        r = self.call('Runtime.evaluate', {'expression': js, 'returnByValue': True,
+                                           'awaitPromise': True}, timeout)
         if 'exceptionDetails' in r:
             raise RuntimeError(r['exceptionDetails'].get('text', 'JS error'))
         return r.get('result', {}).get('value')
 
-    def mark(self):
-        """Tag the current document so wait_ready() can tell when a new one replaced it."""
-        try:
-            self.evaluate('window.__mcOld = 1', 5)
+    # ---------------------------------------------------------- view
+    def resize(self, w, h):
+        self.size = (int(w), int(h))
+        self.call('Emulation.setDeviceMetricsOverride', {
+            'width': self.size[0], 'height': self.size[1], 'deviceScaleFactor': 1, 'mobile': False})
+
+    def start_screencast(self, quality=80, max_w=None, max_h=None):
+        """Frames on every repaint. max_w/max_h let the browser downscale them itself:
+        the retro look needs a quarter of the screen, not a full one per frame."""
+        self.cast = (int(max_w or self.size[0]), int(max_h or self.size[1]))
+        try:                   # a second start while running is an error
+            self.call('Page.stopScreencast', timeout=5)
         except RuntimeError:
             pass
+        self.call('Page.startScreencast', {'format': 'jpeg', 'quality': int(quality),
+                                           'maxWidth': self.cast[0], 'maxHeight': self.cast[1],
+                                           'everyNthFrame': 1})
 
-    def _state(self):
+    def ack(self, session_id):
+        self.send('Page.screencastFrameAck', {'sessionId': session_id})
+
+    def screenshot(self, quality=80):
+        """One JPEG of the viewport now (when no screencast frame came)."""
+        r = self.call('Page.captureScreenshot', {'format': 'jpeg', 'quality': int(quality)}, 20)
+        return base64.b64decode(r.get('data', ''))
+
+    # ---------------------------------------------------------- navigation
+    def navigate(self, url):
+        r = self.call('Page.navigate', {'url': url}, 30)
+        if r.get('errorText'):
+            raise RuntimeError(r['errorText'])
+        return r
+
+    def reload(self):
+        self.call('Page.reload', {'ignoreCache': False})
+
+    def history(self, delta):
+        """One step back (-1) or forward (+1); False when there is none."""
+        h = self.call('Page.getNavigationHistory')
+        i = h.get('currentIndex', 0) + delta
+        entries = h.get('entries', [])
+        if not 0 <= i < len(entries):
+            return False
+        self.call('Page.navigateToHistoryEntry', {'entryId': entries[i]['id']})
+        return True
+
+    def state(self):
+        """(url, title) of the page now."""
+        v = self.evaluate('JSON.stringify([location.href, document.title])', 5)
         try:
-            v = self.evaluate("(window.__mcOld ? 'old' : 'new') + '|' + document.readyState", 5)
-        except RuntimeError:         # no execution context while the navigation commits
-            v = None
-        return (v or 'new|loading').split('|', 1)
+            u, t = json.loads(v or '[]')
+            return u, t
+        except ValueError:
+            return '', ''
 
-    def wait_ready(self, timeout=15, same_doc_ok=False):
-        """Return once the new document is usable: 'complete', or 'interactive' for a short
-        grace period (ads and trackers often keep 'complete' away for many seconds)."""
-        t0 = time.time()
-        t_int = None
-        while time.time() - t0 < timeout:
-            doc, st = self._state()
-            if doc == 'old':
-                # no new document: a script-only update (SPA click) or a cached history step
-                if same_doc_ok and st == 'complete' and time.time() - t0 > 0.35:
-                    break
-            elif st == 'complete':
-                break
-            elif st == 'interactive':
-                t_int = t_int or time.time()
-                if time.time() - t_int > 1.2:
-                    break
-            time.sleep(0.08)
-        time.sleep(0.2)      # let client-side rendering settle
+    def copy_selection(self):
+        return self.evaluate(COPY_JS, 5) or ''
 
-    reader = True
+    def blur(self):
+        self.evaluate(BLUR_JS, 5)
 
-    def extract(self):
-        doc = json.loads(self.evaluate(EXTRACT_JS.replace('__READER__', 'true' if self.reader else 'false'), 30) or '{}')
-        doc.setdefault('blocks', [])
-        doc['forms'] = []
-        doc['widgets'] = {}
-        return doc
+    # ---------------------------------------------------------- input (never waits)
+    def mouse(self, kind, x, y, button='none', clicks=1, buttons=0, modifiers=0):
+        """kind: mouseMoved | mousePressed | mouseReleased."""
+        self.send('Input.dispatchMouseEvent', {
+            'type': kind, 'x': int(x), 'y': int(y), 'button': button, 'buttons': buttons,
+            'clickCount': clicks, 'modifiers': modifiers})
 
-    def load(self, url, data=None):
-        self.mark()
-        self.call('Page.navigate', {'url': url})
-        self.wait_ready()
-        return self.extract()
+    def wheel(self, x, y, dy, dx=0):
+        self.send('Input.dispatchMouseEvent', {'type': 'mouseWheel', 'x': int(x), 'y': int(y),
+                                               'deltaX': dx, 'deltaY': dy})
 
-    def action(self, kind, wid, value=None):
-        sel = 'document.querySelector(\'[data-twid="%d"]\')' % wid
-        if kind == 'click':
-            js = '(() => { const e = %s; if (!e) return 0; e.scrollIntoView({block: "center"}); e.click(); return 1; })()' % sel
-        elif kind == 'set':
-            js = ('(() => { const e = %s; if (!e) return 0; e.focus(); const p = Object.getPrototypeOf(e); '
-                  'const d = Object.getOwnPropertyDescriptor(p, "value"); if (d && d.set) d.set.call(e, %s); else e.value = %s; '
-                  'e.dispatchEvent(new Event("input", {bubbles: true})); e.dispatchEvent(new Event("change", {bubbles: true})); return 1; })()'
-                  % (sel, json.dumps(value), json.dumps(value)))
-        elif kind == 'submit':
-            js = ('(() => { const e = %s; if (!e) return 0; e.focus(); if (e.form) { if (e.form.requestSubmit) e.form.requestSubmit(); else e.form.submit(); return 2; } return 1; })()' % sel)
-        elif kind == 'select':
-            js = ('(() => { const e = %s; if (!e) return 0; e.value = %s; e.dispatchEvent(new Event("change", {bubbles: true})); return 1; })()'
-                  % (sel, json.dumps(value)))
-        else:
-            return None
-        self.mark()
-        r = self.evaluate(js)
-        if kind == 'submit' and r == 1:
-            for t in ('keyDown', 'keyUp'):
-                self.call('Input.dispatchKeyEvent', {'type': t, 'key': 'Enter', 'code': 'Enter',
-                                                     'windowsVirtualKeyCode': 13, 'text': '\r' if t == 'keyDown' else ''})
-        if kind in ('click', 'submit', 'select'):
-            self.wait_ready(10, same_doc_ok=True)
-            return self.extract()
-        return None
+    def key(self, name):
+        evs = key_events(name)
+        for e in evs:
+            self.send('Input.dispatchKeyEvent', e)
+        return bool(evs)
 
-    def back(self):
-        self.mark()
-        self.evaluate('history.back()')
-        self.wait_ready(same_doc_ok=True)
-        return self.extract()
+    def insert_text(self, text):
+        self.send('Input.insertText', {'text': text})
 
     def close(self):
+        self.closed = True
+        try:
+            self.send('Page.stopScreencast')
+        except Exception:
+            pass
         try:
             self.ws.close()
         except Exception:

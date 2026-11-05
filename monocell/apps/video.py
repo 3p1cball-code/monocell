@@ -36,6 +36,7 @@ class Video(App):
         self.info = None
         self.audio = AudioPlayer(wm, self, on_end=None, on_error=lambda m: wm.toast(m, 'red'))
         self.dec = None
+        self.goriginal = False     # graphics mode 'o': full resolution and colour
         self.buf = bytearray()
         self.frames = []           # list of (index, rgb bytes)
         self.frame_cells = None
@@ -182,7 +183,8 @@ class Video(App):
         look = look if look in fbmode.LOOKS else 'vga'
         dither = cfg.get('gfx_dither', 'bayer')
         # always a quarter of the screen resolution: more is not smooth on old hardware
-        return look, fbmode.SCALE, dither, bool(cfg.get('gfx_scanlines', False))
+        scale = 1 if self.goriginal else fbmode.SCALE
+        return look, scale, dither, bool(cfg.get('gfx_scanlines', False))
 
     def start_gfx_decoder(self, video):
         look, scale, dither, scan = self.gfx_settings()
@@ -195,12 +197,11 @@ class Video(App):
                                      g.fb.pix_fmt, theme_rgb=th.rgb,
                                      accent=th.rgb[th.r['accent']], look=look, scale=scale,
                                      dither=dither, scanlines=scan, fps=self.fps,
-                                     vga_palette=pal)
+                                     vga_palette=pal, original=self.goriginal)
         except (OSError, ValueError) as e:
             self.err = str(e)
             return
         self.dims = cv
-        g.scale = scale
         self.gfx_cur = None
         self.gfx_fill = 0
         try:
@@ -277,6 +278,9 @@ class Video(App):
     def gfx_label(self):
         look, scale, dither, scan = self.gfx_settings()
         cw, ch = fbmode.canvas(self.gfx.screen, scale) if self.gfx else (0, 0)
+        if self.goriginal:
+            return '%s  %dX%d  FULL COLOUR  %d FPS' % (fbmode.ORIGINAL_LABEL, cw, ch,
+                                                      self.gfx_rate())
         parts = [fbmode.LOOKS[look][0], '%dX%d' % (cw, ch), dither, '%d FPS' % self.gfx_rate()]
         if scan:
             parts.append('SCANLINES')
@@ -319,10 +323,11 @@ class Video(App):
             return
         self.gfx = sess
         self.wm.enter_gfx(self)
+        self.goriginal = False
         self.resyncs = []
         self.gfx_t0 = (time.monotonic(), self.stats[0], 0)
         tuning = self.tune_palette()
-        self.gfx_note('G EXIT  C LOOK  D DITHER  S SCANLINES',
+        self.gfx_note('G EXIT  O ORIGINAL  C LOOK  D DITHER  S SCANLINES',
                       'TUNING THE PALETTE...' if tuning else None, secs=5.0)
         self.start(pos)
 
@@ -384,6 +389,7 @@ class Video(App):
             cur = fbmode.OLD_LOOKS.get(cur, cur)
         cfg[key] = values[(values.index(cur) + 1) % len(values)] if cur in values else values[0]
         cfg.save()
+        self.goriginal = False                  # a look key means: show me the look
         tuning = key == 'gfx_look' and cfg[key] == 'vga' and self.tune_palette()
         self.gfx_cap = 0
         self.start(self.media_time())
@@ -394,6 +400,12 @@ class Video(App):
         """Keys while the console shows graphics; True when handled here."""
         if k in ('g', 'esc', 'q', 'f', 'enter'):
             self.leave_gfx()
+        elif k == 'o':
+            # full resolution, full colour: the fallback when a look hides something
+            self.goriginal = not self.goriginal
+            self.gfx_cap = 0
+            self.start(self.media_time(), audio=False)
+            self.gfx_note('O: BACK TO THE LOOK' if self.goriginal else 'O: ORIGINAL')
         elif k == 'c':
             self.gfx_change('gfx_look', fbmode.LOOK_ORDER)
         elif k == 'd':
@@ -404,7 +416,7 @@ class Video(App):
             self.audio.volume = (min(1.5, self.audio.volume + 0.1) if k != '-'
                                  else max(0, self.audio.volume - 0.1))
             self.gfx.note(['VOLUME %d%%' % round(self.audio.volume * 100)], 1.5)
-        elif k in ('m', 'o', 'ctrl+o'):
+        elif k in ('m', 'ctrl+o'):
             pass                                # no text UI to show in graphics mode
         else:
             return False

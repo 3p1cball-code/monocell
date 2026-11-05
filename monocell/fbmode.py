@@ -427,13 +427,37 @@ def build(video, screen, line_px, pix_fmt, look='vga', scale=SCALE, dither='baye
     return inputs, ';'.join(g), (cw, ch)
 
 
+ORIGINAL_LABEL = 'ORIGINAL'
+
+
+def build_original(video, screen, line_px, pix_fmt, fps=25, down='bilinear'):
+    """(inputs, graph, canvas) for the original look: the full display resolution
+    in full colour - no palette, no dither, no upscale. The fallback when a retro
+    look makes something unreadable."""
+    W, H = screen
+    fw, fh = fit(video.get('w', 16), video.get('h', 9), video.get('sar', 1.0), W, H)
+    pre = '' if fps is None else 'fps=%d,' % fps
+    g = ('[0:v]%sscale=%d:%d:flags=%s,setsar=1,format=rgb24,'
+         'pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,pad=%d:%d:0:0:black,format=%s[out]'
+         % (pre, fw, fh, down, W, H, line_px, H, pix_fmt))
+    return [], g, (W, H)
+
+
 def command(path, offset, video, screen, line_px, pix_fmt, theme_rgb=None, accent=None,
             look='vga', scale=SCALE, dither='bayer', scanlines=False, fps=25, vga_palette=None,
-            down='area'):
+            down='area', original=False):
     """The ffmpeg command line producing raw framebuffer frames on stdout.
 
     `vga_palette`: the tuned palette of this video (make_video_palette); without
-    it VGA uses an even colour cube."""
+    it VGA uses an even colour cube. `original=True` ignores look, scale, dither
+    and scanlines: full resolution, full colour."""
+    if original:
+        inputs, graph, cv = build_original(video, screen, line_px, pix_fmt, fps)
+        cmd = ['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2',
+               '-ss', '%.3f' % offset, '-i', path, '-an', '-sn',
+               '-filter_complex', graph, '-map', '[out]',
+               '-f', 'rawvideo', '-pix_fmt', pix_fmt, '-']
+        return cmd, cv
     pal = pattern = None
     colours = palette_colours(look, theme_rgb, accent)
     if look in LUMA_LOOKS:                 # dither in grey, colour afterwards
@@ -463,7 +487,7 @@ def command(path, offset, video, screen, line_px, pix_fmt, theme_rgb=None, accen
 
 def image_command(size, screen, line_px, pix_fmt, theme_rgb=None, accent=None, look='vga',
                   scale=SCALE, dither='bayer', scanlines=False, vga_palette=None,
-                  down='area', bayer_scale=None, out='raw'):
+                  down='area', bayer_scale=None, out='raw', original=False):
     """The same look for still pictures (the map app): the input comes on stdin as one
     raw rgb24 frame of `size` canvas pixels, each frame in gives one framebuffer frame.
 
@@ -471,22 +495,27 @@ def image_command(size, screen, line_px, pix_fmt, theme_rgb=None, accent=None, l
     pattern, scanline mask, nearest-neighbour upscale. `out='ppm'` is for the long
     running StillPipeline: the rawvideo muxer buffers a frame until the next one
     arrives, the image2pipe muxer flushes every picture."""
-    colours = palette_colours(look, theme_rgb, accent)
+    colours = palette_colours(look, theme_rgb, accent) if not original else None
     pal = pattern = mask = None
-    if look in LUMA_LOOKS:
+    if original:
+        pass
+    elif look in LUMA_LOOKS:
         cw, ch = canvas(screen, scale)
         pattern = bayer_file(cw, ch, 255 // (len(colours) - 1))
     elif look == 'vga' and vga_palette:
         pal = vga_palette
     else:
         pal = palette_file(colours)
-    if scanlines:
+    if scanlines and not original:
         cw, ch = canvas(screen, scale)
         mask = scanline_file(cw * scale, ch * scale, scale)
     video = {'w': size[0], 'h': size[1], 'sar': 1.0}
-    inputs, graph, cv = build(video, screen, line_px, pix_fmt, look, scale, dither,
-                              scanlines, None, pal, mask, colours, pattern, down,
-                              bayer_scale)
+    if original:
+        inputs, graph, cv = build_original(video, screen, line_px, pix_fmt, None)
+    else:
+        inputs, graph, cv = build(video, screen, line_px, pix_fmt, look, scale, dither,
+                                  scanlines, None, pal, mask, colours, pattern, down,
+                                  bayer_scale)
     cmd = ['ffmpeg', '-v', 'error', '-nostdin',
            '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '%dx%d' % (size[0], size[1]),
            '-i', '-']
@@ -520,12 +549,18 @@ class StillPipeline:
 
     PPM_TARGET = {32: 'BGRX', 24: 'BGR', 16: 'BGR;16'}
 
-    def __init__(self, size, fb, **kw):
+    def __init__(self, size, fb, original=False, **kw):
         self.fb = fb
         self.size = (int(size[0]), int(size[1]))
         if fb.bpp not in self.PPM_TARGET:
             raise OSError('unsupported framebuffer depth: %d bit' % fb.bpp)
         self.target = self.PPM_TARGET[fb.bpp]
+        self.original = original
+        self.proc = None
+        if original:
+            # nothing for ffmpeg to do: the canvas is the screen, PIL converts
+            self.canvas = (fb.w, fb.h)
+            return
         cmd, self.canvas = image_command(self.size, (fb.w, fb.h), fb.w, 'rgb24',
                                          out='ppm', **kw)
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -548,6 +583,8 @@ class StillPipeline:
 
     def frame(self, rgb):
         """One canvas frame (rgb24, size) -> bytes for the framebuffer."""
+        if self.original:
+            return self.convert(rgb, self.size)
         try:
             self.proc.stdin.write(rgb)
             self.proc.stdin.flush()
@@ -562,13 +599,17 @@ class StillPipeline:
         if not hdr.startswith(b'P6'):
             raise OSError('graphics pipeline: unexpected output')
         w, h = (int(v) for v in hdr.split(b'\n')[1].split())
-        data = bytes(self._read(w * h * 3))
+        return self.convert(bytes(self._read(w * h * 3)), (w, h))
+
+    def convert(self, data, size):
+        """rgb24 of `size` -> framebuffer bytes: centred on the screen, line padding."""
         from PIL import Image
-        img = Image.frombytes('RGB', (w, h), data)
-        if self.fb.w > w:                         # line padding
-            wide = Image.new('RGB', (self.fb.line_px, h), (0, 0, 0))
-            wide.paste(img, (0, 0))
-            img = wide
+        fb = self.fb
+        img = Image.frombytes('RGB', size, data)
+        if size != (fb.line_px, fb.h):
+            out = Image.new('RGB', (fb.line_px, fb.h), (0, 0, 0))
+            out.paste(img, (max(0, (fb.w - size[0]) // 2), max(0, (fb.h - size[1]) // 2)))
+            img = out
         return img.tobytes('raw', self.target)
 
     def close(self):
@@ -615,6 +656,108 @@ FONT = {
 
 def text_width(text, px):
     return len(text) * 4 * px - px if text else 0
+
+
+# ------------------------------------------------------------------ console font text
+def load_psf(path):
+    """(width, height, glyphs, {char: glyph index}) of a PSF1/PSF2 font (plain or gzip)."""
+    import gzip
+    import struct
+    with open(path, 'rb') as f:
+        raw = f.read()
+    data = gzip.decompress(raw) if path.endswith('.gz') else raw
+    umap = {}
+    if data[:2] == b'\x36\x04':
+        mode, height = data[2], data[3]
+        count, size, width, off = (512 if mode & 1 else 256), height, 8, 4
+        glyphs = [data[off + i * size:off + (i + 1) * size] for i in range(count)]
+        if mode & 2:                         # unicode table: uint16, 0xFFFF ends a glyph
+            pos, i = off + count * size, 0
+            while pos + 1 < len(data) and i < count:
+                v = data[pos] | data[pos + 1] << 8
+                pos += 2
+                if v == 0xFFFF:
+                    i += 1
+                elif v != 0xFFFE:
+                    umap.setdefault(chr(v), i)
+    else:
+        magic, version, hdr, flags, count, size, height, width = \
+            struct.unpack('<IIIIIIII', data[:32])
+        if magic != 0x864AB572:
+            raise ValueError('not a PSF font: %s' % path)
+        glyphs = [data[hdr + i * size:hdr + (i + 1) * size] for i in range(count)]
+        if flags & 1:                        # utf-8 sequences, 0xFF ends a glyph
+            pos, i = hdr + count * size, 0
+            # per glyph: single characters back to back, then 0xFE + combining
+            # sequences, 0xFF at the end
+            seq, singles = bytearray(), True
+            while pos < len(data) and i < count:
+                c = data[pos]
+                pos += 1
+                if c in (0xFF, 0xFE):
+                    t = seq.decode('utf-8', 'ignore')
+                    if singles:
+                        for ch in t:
+                            umap.setdefault(ch, i)
+                    elif len(t) == 1:
+                        umap.setdefault(t, i)
+                    seq = bytearray()
+                    singles = c == 0xFF
+                    if c == 0xFF:
+                        i += 1
+                else:
+                    seq.append(c)
+    return width, height, glyphs, umap
+
+
+class ConsoleFont:
+    """Text in the console font, drawn with PIL: what the HUD of the web view needs
+    (lower case, punctuation of URLs) and the 3x5 OSD font cannot show."""
+
+    def __init__(self, path):
+        self.w, self.h, self.glyphs, self.umap = load_psf(path)
+        self.nb = (self.w + 7) // 8
+        self.cache = {}
+
+    def glyph(self, ch):
+        g = self.cache.get(ch)
+        if g is None:
+            from PIL import Image
+            i = self.umap.get(ch, ord(ch) if ord(ch) < len(self.glyphs) and not self.umap else None)
+            if i is None:
+                i = self.umap.get('?', ord('?'))
+            data = self.glyphs[i]
+            g = Image.frombytes('1', (self.nb * 8, self.h), bytes(data)).crop((0, 0, self.w, self.h))
+            self.cache[ch] = g
+        return g
+
+    def draw(self, img, x, y, text, rgb, limit=None):
+        """Draw `text` at (x, y) into a PIL RGB image; returns the x after it."""
+        right = img.size[0] if limit is None else limit
+        for ch in text:
+            if x + self.w > right:
+                break
+            img.paste(rgb, (x, y), self.glyph(ch))
+            x += self.w
+        return x
+
+
+def console_font(name=None):
+    """The theme's console font (fallback: the bundled Fixed 8x16), or None."""
+    try:
+        from .theme import console_font_path, PACKAGE_DIR
+    except ImportError:
+        return None
+    for n in (name, 'Lat15-Fixed16.psf.gz'):
+        path = console_font_path(n) if n else None
+        if not path and n == 'Lat15-Fixed16.psf.gz':
+            path = os.path.join(PACKAGE_DIR, 'fonts', n)
+        if path and os.path.exists(path):
+            try:
+                return ConsoleFont(path)
+            except (OSError, ValueError, IndexError):
+                continue
+    return None
 
 
 # ------------------------------------------------------------------ the session
@@ -698,6 +841,27 @@ class Session:
         for off, data in runs:
             buf[off:off + len(data)] = data
         self.fb.write(buf)
+
+    def paint_rows(self, y0, y1):
+        """Only rows y0..y1 of the frame (with the OSD there): a moving mouse pointer
+        costs a few kB instead of the whole screen."""
+        if self.frame is None or not self.active():
+            return
+        st = self.fb.stride
+        y0, y1 = max(0, int(y0)), min(self.fb.h, int(y1))
+        if y1 <= y0:
+            return
+        a, b = y0 * st, y1 * st
+        runs = self.osd_runs()
+        if not runs:
+            self.fb.write(memoryview(self.frame)[a:b], a)
+            return
+        buf = bytearray(memoryview(self.frame)[a:b])
+        for off, data in runs:
+            lo, hi = max(off, a), min(off + len(data), b)
+            if lo < hi:
+                buf[lo - a:hi - a] = data[lo - off:hi - off]
+        self.fb.write(buf, a)
 
     def tick(self, now, pos, dur, paused):
         """Called often: repaint when the OSD appears, changes or disappears, or

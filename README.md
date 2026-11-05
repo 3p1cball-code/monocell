@@ -13,7 +13,8 @@ Hardware (getestet gegen ein ThinkPad X61s mit 1024×768).
 | ![Image viewer](screenshots/image-viewer.png) | ![PDF reader](screenshots/pdf.png) |
 | ![Matrix rain](screenshots/matrix.png) | ![Paper theme](screenshots/paper.png) |
 
-**Grafikmodus** – dieselben Looks wie der Videoplayer, für Karte und Bilder:
+**Grafikmodus** – dieselben Looks wie der Videoplayer, für Karte, Bilder und den
+Browser; `o` schaltet überall auf das Original (volle Auflösung, volle Farben):
 
 | | |
 |---|---|
@@ -147,16 +148,33 @@ monocell-clip --clear
   als Kopie mit Fortschritt, innerhalb eines Laufwerks ist Verschieben ein Rename.
   Der Kopiervorgang läuft im Hintergrund weiter, auch wenn man im Dateimanager
   weiterblättert.
-* **Browser** – zwei Engines: `lite` (urllib + HTML-Parser, ohne JavaScript, sehr schnell)
-  und **Chromium/Brave headless über das DevTools-Protokoll** (JavaScript/SPA). Die
-  Chromium-Engine startet schon beim Öffnen des Fensters, blockiert Schriften, Medien und
-  Werbe-/Tracking-Domains, wartet nicht auf nachladende Werbung und nutzt
+* **Browser** – die Seite als Text (eigener HTML-Parser, `urllib`, ohne JavaScript; sehr
+  schnell): Lesemodus (`Aa` in der Leiste schaltet zwischen Lesemodus und ganzer Seite),
+  Links, Formulare, Tabellen, Symbole und Bilder als geditherte Blöcke. `Ctrl+L`
+  Adresszeile, `Tab` Links, `Alt+←/→` oder `Backspace` Verlauf, `Ctrl+D` Lesezeichen,
+  `Ctrl+F` suchen. Erkennt die Textansicht eine reine JavaScript-Seite, sagt sie es.
+  **`Ctrl+G`** (oder `Gfx` in der Leiste) zeigt dieselbe Seite als **echte Pixel**: ein
+  headless Chromium/Brave rendert sie und schickt über das DevTools-Protokoll ein Bild,
+  sobald sich etwas ändert (kein Dauerfeuer; die Seite wartet auf unsere Bestätigung,
+  also höchstens ~20 Bilder/s). Maus und Tastatur gehen als echte Eingaben zurück;
+  der Zeiger wird selbst gezeichnet und zeilenweise aktualisiert. Der Browser startet
+  in voller Auflösung und Farbe; `Ctrl+O`/`o` schaltet auf die Retro-Looks des Players
+  (die Anfrage an Chromium wird dann auf ein Viertel der Auflösung verkleinert – die
+  JPEGs bleiben klein). Werbefarmen sind geblockt, Schriften und Bilder nicht;
   `--password-store=basic` (ohne Desktop-Sitzung hing die erste Anfrage sonst 25 s am
-  Schlüsselbund). Beide
-  werden in dasselbe Zellen-Layout umgesetzt: Lesemodus (`Aa` in der Leiste schaltet
-  zwischen Lesemodus und ganzer Seite), Links, Formulare, Tabellen, Symbole und Bilder
-  als geditherte Blöcke. Kein Screenshot→ASCII, sondern DOM→Text. Erkennt die
-  lite-Engine eine reine JavaScript-Seite, weist sie darauf hin, auf Chromium zu wechseln.
+  Schlüsselbund). Popups bleiben im selben Tab, Dialoge werden angenommen.
+
+  | Taste im Grafikmodus | Wirkung |
+  |---|---|
+  | `Ctrl+G` / `g` | zurück zur Textansicht (lädt dieselbe Adresse) |
+  | `Ctrl+L` / `l` | Adresszeile in der Statusleiste (Klick auf die Leiste auch) |
+  | `Ctrl+R` / `F5` / `r` | neu laden · `Alt+←/→`, `Backspace` Verlauf |
+  | `Ctrl+O` / `o` | Original ↔ Retro-Look · `Alt+C/D/S` Look, Dithering, Scanlines |
+  | `Ctrl+C` / `Ctrl+V` | Auswahl kopieren / monocell-Zwischenablage einfügen |
+  | `Esc` | Feld verlassen, sonst Grafikmodus beenden |
+
+  In einem Textfeld tippt alles normal – die Einzeltasten-Hotkeys (`g`, `o`, `l`, `r`,
+  `c`, `d`, `s`) gelten nur außerhalb; die `Ctrl`-Kombinationen immer.
 * **Terminal** – eigener VT100/xterm-Emulator (Farben, Alternativbildschirm, Maus,
   Bracketed Paste, Scrollback, Kopieren per Ziehen) auf einer echten PTY; vim, top, less
   laufen darin. `Ctrl+Shift+C` kopiert, `Ctrl+Shift+V`/`Ctrl+V`/`Shift+Insert`/Mittelklick fügt ein.
@@ -211,7 +229,8 @@ monocell-clip --clear
   Bild selbst gerechnet (aus dem schon geladenen Bild, gecacht wie beim Video) – bis sie
   fertig ist, läuft der 6×7×6-Würfel. `+`/`-` und Mausrad zoomen (bis 16×, aus dem
   Original gecroppt statt hochskaliert), Pfeile panen, `0`/`z` passt wieder ein,
-  `n`/`p`/`Leertaste` blättern, `g`/`Esc` zurück. Fit und Zoom rechnen auf dem Canvas
+  `n`/`p`/`Leertaste` blättern, `o` Original (volle Auflösung, volle Farben),
+  `g`/`Esc` zurück. Fit und Zoom rechnen auf dem Canvas
   (256×192), damit das Bild bei jedem Zoom scharf aus der Quelle kommt.
 * **Video** – ffmpeg dekodiert direkt auf Zellauflösung; im randlosen Vollbild wird die
   volle Bildfläche als Zellen genutzt. Ton läuft parallel über die Audio-Pipeline (die
@@ -232,7 +251,8 @@ monocell-clip --clear
   | `AMBER` | Bernstein-Monitor: Schwarz, Glimmen, Bernstein, Lichter brennen fast weiß aus |
   | `GREEN` | grüner Phosphor-Monitor, ebenso mit fast weißen Lichtern |
 
-  Tasten im Grafikmodus: `c` Look, `d` Dithering an/aus, `s` Scanlines,
+  Tasten im Grafikmodus: `c` Look, `d` Dithering an/aus, `s` Scanlines, `o` Original
+  (volle Auflösung und Farbe, ohne Palette – für Texte und Details),
   `Leertaste`/Klick Pause, Pfeile spulen, `+`/`-` Lautstärke, `g`/`Esc` zurück zum Desktop.
   Ein OSD in 3×5-Pixelschrift zeigt Zeit und Modus; es wird im Speicher in das Bild
   gesetzt und mit ihm in einem Schreibvorgang ausgegeben, damit es nicht flackert. Die
@@ -262,6 +282,7 @@ monocell-clip --clear
   | `+`/`-`, Mausrad | zoomen (Z2–Z19, ganzzahlige Kachelstufen) |
   | `b` oder `/` | Ortssuche; tippen, `Enter` sucht, Pfeile wählen, `Enter` springt hin |
   | `c` `d` `s` | Look, Dithering, Scanlines (wie im Player) |
+  | `o` | Original: volle Auflösung und Farbe (zwei Zoomstufen höher, gleicher Ausschnitt) |
   | `t` | Kachelquelle wechseln (OSM, OSM DE, Carto Light/Dark, OpenTopoMap) |
   | `r` | Kacheln neu laden · `h` Berlin · `g`/`Esc` zurück |
 
@@ -311,7 +332,8 @@ monocell-clip --clear
 * **Einstellungen** – Erscheinungsbild-Editor im Stil von Windows 95/98 (siehe unten),
   Taskleiste, Rahmen, Schatten, Uhr, Hintergrund inkl.
   Background-Reiter mit Regen-Dichte/-Geschwindigkeit/-Zufall, Symbole, Bild-/Video-Modus (inkl.
-  ASCII-Zeichensatz), Web-Engine, Google-Calendar-Adresse, opencode-Befehl/Host.
+  ASCII-Zeichensatz), Browser-Grafikmodus (Chromium/Brave-Pfad), Google-Calendar-Adresse,
+  opencode-Befehl/Host.
 
 ## Wechselmedien
 

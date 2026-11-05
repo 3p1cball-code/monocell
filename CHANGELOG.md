@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.3.0 — 2026-11-05
+
+- **Browser graphics mode (Ctrl+G)**: the text view stays as it was (own HTML parser,
+  no JavaScript); `Ctrl+G` shows the same page as real pixels from a headless
+  Chromium/Brave over the DevTools protocol. Frames arrive only when the page
+  changes (Page.startScreencast, acked at most ~20/s), mouse and keyboard go back in
+  as real input events, the pointer is drawn locally and updated row by row.
+  In full resolution and colour by default; `Ctrl+O`/`o` switches to the player's
+  retro looks, and Chromium then renders only a quarter of the screen for us.
+  Address bar in the status line (`Ctrl+L`), history (`Alt+Left/Right`, `Backspace`),
+  reload (`Ctrl+R`/`F5`), copy (`Ctrl+C`) and the monocell clipboard (`Ctrl+V`),
+  clickable links/fields/buttons, double clicks, wheel and middle-button scrolling.
+  Single-letter hotkeys act only outside text fields (`Ctrl` combinations always).
+  Text from the text view is dropped: Chromium is now only the graphics mode.
+  Ads/trackers blocked, fonts and pictures not; popups stay in the tab.
+- **Original mode in every graphics app** (`o` in video, pictures, maps, browser):
+  full display resolution in full colour - no palette, no dither, no upscale. The
+  video graph and the still pipeline have a plain path for it (stills need no
+  ffmpeg then).
+- **Map**: `o` keeps the same area (two tile zoom levels up) and saves the normal
+  zoom level again on leaving.
+- **Fix**: mouse input in graphics mode crashed on the VT (`term.cols`/`term.rows`
+  do not exist - maps and pictures dragged/zoomed nothing). Now `term.w`/`term.h`.
+- **Fix**: the screen-size helper for the still pipeline centres and pads correctly
+  (was only used at full size before).
+- Tests: 532 (new: webgfx geometry/hotkeys, CDP key mapping, console font, partial
+  row repaint, original-mode pipeline).
+
 ## 1.2.0 — 2026-11-04
 
 - **Writer** shows the printed page: 80×66 sheet with margins, page numbers and

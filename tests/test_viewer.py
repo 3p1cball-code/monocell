@@ -132,5 +132,21 @@ class TestCanvas(unittest.TestCase):
         self.assertEqual(out.getpixel((W // 2, H // 2)), (1, 2, 3))
 
 
+
+class TestOriginal(unittest.TestCase):
+    def test_original_canvas_is_the_screen(self):
+        v = viewer(solid(1000, 500))
+        v.goriginal = True
+        img = v.gfx_picture()
+        self.assertEqual(img.size, (1024, 768))
+        self.assertEqual(v.gfx_label().split()[0], 'ORIGINAL')
+
+    def test_arrow_pan_covers_the_same_screen_distance(self):
+        v = viewer(solid(1000, 500))
+        self.assertEqual(v.gfx_step(), 16)
+        v.goriginal = True
+        self.assertEqual(v.gfx_step(), 64)
+
+
 if __name__ == '__main__':
     unittest.main()

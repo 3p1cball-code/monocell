@@ -205,6 +205,33 @@ class TestPipeline(unittest.TestCase):
                       for y in range(4) for x in range(4)}
                 self.assertEqual(len(px), 1, (bx, by))
 
+    def test_original_is_full_resolution_full_colour(self):
+        raw, cv = self.frame('ega', original=True)
+        self.assertEqual(cv, (W * 4, H * 4))                     # the whole screen
+        self.assertGreater(len(self.colours(raw)), 256)          # no palette at all
+        cmd, _ = fbmode.command(self.clip, 0.2, {'w': 320, 'h': 180, 'sar': 1.0},
+                                (W * 4, H * 4), W * 4, 'bgr0', original=True, scanlines=True)
+        g = cmd[cmd.index('-filter_complex') + 1]
+        for word in ('paletteuse', 'neighbor', 'multiply', 'lutrgb'):
+            self.assertNotIn(word, g)
+
+    def test_original_still_needs_no_ffmpeg(self):
+        d = tempfile.mkdtemp()
+        try:
+            fb = fbmode.Framebuffer(os.path.join(d, 'fb'), geometry=(40, 20, 32, 48 * 4))
+            p = fbmode.StillPipeline((30, 10), fb, original=True)
+            self.assertIsNone(p.proc)
+            self.assertEqual(p.canvas, (40, 20))
+            out = p.frame(bytes((10, 20, 30)) * 300)
+            self.assertEqual(len(out), 48 * 4 * 20)               # line padding kept
+            row = 20 // 2 * 48 * 4
+            self.assertEqual(out[row + 20 * 4:row + 20 * 4 + 3], bytes((30, 20, 10)))  # centred, BGR
+            self.assertEqual(out[:4], bytes(4))                   # black around it
+            p.close()
+            fb.close()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
     def test_tuned_vga_palette(self):
         pal = fbmode.make_video_palette(self.clip)
         self.assertTrue(pal and os.path.exists(pal))
@@ -286,6 +313,34 @@ class TestSession(unittest.TestCase):
         for t in texts:
             missing = {c for c in t if c not in fbmode.FONT}
             self.assertEqual(missing, set(), t)
+
+    def test_paint_rows_writes_only_that_band(self):
+        s, fb, _ = self.make()
+        frame = bytearray(bytes([7]) * fb.size)
+        s.show(frame)
+        s.frame = frame                      # as after show(), without repainting
+        writes = []
+        real = fb.write
+        fb.write = lambda data, offset=0: (writes.append((offset, len(data))), real(data, offset))
+        s.paint_rows(100, 120)
+        self.assertEqual(writes, [(100 * fb.stride, 20 * fb.stride)])
+        out = self.read(fb)
+        self.assertEqual(out[50 * fb.stride:150 * fb.stride], bytes(frame[50 * fb.stride:150 * fb.stride]))
+
+    def test_console_font_draws_lower_case(self):
+        f = fbmode.console_font('Lat15-Fixed16.psf.gz')
+        self.assertEqual((f.w, f.h), (8, 16))
+        for ch in 'aZ*~/?.':
+            self.assertIn(ch, f.umap)
+        self.assertNotEqual(bytes(f.glyph('a').getdata()), bytes(f.glyph('b').getdata()))
+        from PIL import Image
+        img = Image.new('RGB', (200, 20))
+        end = f.draw(img, 2, 2, 'https://x.org/a', (255, 255, 255))
+        self.assertEqual(end, 2 + 15 * 8)
+        inside = [img.getpixel((x, y)) for x in range(2, end) for y in range(2, 18)]
+        self.assertIn((255, 255, 255), inside)
+        self.assertEqual(img.getpixel((end + 1, 10)), (0, 0, 0))          # nothing after it
+        self.assertEqual(f.draw(img, 0, 0, 'abcdef', (1, 2, 3), limit=16), 16)
 
     def test_clock(self):
         self.assertEqual(fbmode.clock(65), '1:05')

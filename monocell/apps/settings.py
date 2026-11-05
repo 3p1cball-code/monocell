@@ -57,11 +57,10 @@ OPTIONS = {
         ('map_zoom', 'Zoom (2-19)', list(range(2, 20))),
     ],
     'web': [
-        ('web_engine', 'Engine', ['auto', 'lite', 'chromium']),
         ('web_images', 'Show images', [False, True]),
         ('web_home', 'Home page', 'text'),
         ('search_url', 'Search URL (%s = query)', 'text'),
-        ('chromium', 'Chromium/Brave binary (empty = auto)', 'text'),
+        ('chromium', 'Chromium/Brave for the graphics mode (empty = auto)', 'text'),
     ],
     'calendar': [
         ('gcal_url', 'Google Calendar iCal address', 'text'),
