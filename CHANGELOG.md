@@ -18,6 +18,10 @@
   canvas pixel) in the darkest and brightest colours of that look's palette.
   Text from the text view is dropped: Chromium is now only the graphics mode.
   Ads/trackers blocked, fonts and pictures not; popups stay in the tab.
+- **Browser zoom** in the graphics mode: `Ctrl++`/`Ctrl+-`/`Ctrl+0` (and `Alt++`/`Alt+-`
+  where Ctrl and a printable key cannot be told apart), 50-300 %. Zooming in uses the
+  browser's page scale - the layout stays, the picture is magnified and stays sharp,
+  the wheel pans it; zooming out uses a wider CSS viewport. Saved as `web_zoom`.
 - **Original mode in every graphics app** (`o` in video, pictures, maps, browser):
   full display resolution in full colour - no palette, no dither, no upscale. The
   video graph and the still pipeline have a plain path for it (stills need no

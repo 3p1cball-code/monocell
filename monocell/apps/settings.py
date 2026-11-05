@@ -58,6 +58,8 @@ OPTIONS = {
     ],
     'web': [
         ('web_images', 'Show images', [False, True]),
+        ('web_zoom', 'Graphics mode zoom (%)',
+         [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300]),
         ('web_home', 'Home page', 'text'),
         ('search_url', 'Search URL (%s = query)', 'text'),
         ('chromium', 'Chromium/Brave for the graphics mode (empty = auto)', 'text'),

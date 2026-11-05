@@ -801,6 +801,7 @@ class Page:
         self.closed = False
         self.size = size
         self.cast = None
+        self.zoom = 1.0
         self.main_frame = None
         self.reader = threading.Thread(target=self._read, name='cdp-reader', daemon=True)
         self.reader.start()
@@ -899,19 +900,59 @@ class Page:
     # ---------------------------------------------------------- view
     def resize(self, w, h):
         self.size = (int(w), int(h))
-        self.call('Emulation.setDeviceMetricsOverride', {
-            'width': self.size[0], 'height': self.size[1], 'deviceScaleFactor': 1, 'mobile': False})
+        self._metrics()
+
+    def _metrics(self):
+        """Viewport for the current zoom.
+
+        Zooming in is the browser's page scale (pinch): the layout stays as it is,
+        the picture is magnified and stays sharp (the screencast keeps the full
+        device resolution); the wheel pans it. Zooming out needs a wider CSS
+        viewport (a page scale below 1 is not allowed) - the frames then come a
+        bit larger and are scaled down by the caller."""
+        z = self.zoom
+        if z < 1.0:
+            self.call('Emulation.setPageScaleFactor', {'pageScaleFactor': 1})
+            w, h = max(1, int(round(self.size[0] / z))), max(1, int(round(self.size[1] / z)))
+            self.call('Emulation.setDeviceMetricsOverride',
+                      {'width': w, 'height': h, 'deviceScaleFactor': 1, 'mobile': False})
+        else:
+            self.call('Emulation.setDeviceMetricsOverride',
+                      {'width': self.size[0], 'height': self.size[1],
+                       'deviceScaleFactor': 1, 'mobile': False})
+            self.call('Emulation.setPageScaleFactor', {'pageScaleFactor': z})
+
+    def set_zoom(self, z):
+        z = max(0.5, min(3.0, float(z)))
+        if abs(z - self.zoom) < 1e-3:
+            return
+        self.zoom = z
+        self._metrics()
+        if self.cast:
+            self.start_screencast(80, *self.cast)     # the frame size changed
+
+    def css_size(self):
+        """The area input coordinates refer to, in CSS pixels.
+
+        Zoomed in, that is the visual viewport (the layout keeps its width, the page
+        scale magnifies it); zoomed out, the wider CSS viewport."""
+        z = self.zoom
+        return max(1, int(round(self.size[0] / z))), max(1, int(round(self.size[1] / z)))
 
     def start_screencast(self, quality=80, max_w=None, max_h=None):
         """Frames on every repaint. max_w/max_h let the browser downscale them itself:
         the retro look needs a quarter of the screen, not a full one per frame."""
         self.cast = (int(max_w or self.size[0]), int(max_h or self.size[1]))
+        # maxWidth/maxHeight are CSS pixels; zoomed out the CSS viewport is wider
+        k = min(1.0, self.zoom)
+        mw = max(1, int(round(self.cast[0] / k)))
+        mh = max(1, int(round(self.cast[1] / k)))
         try:                   # a second start while running is an error
             self.call('Page.stopScreencast', timeout=5)
         except RuntimeError:
             pass
         self.call('Page.startScreencast', {'format': 'jpeg', 'quality': int(quality),
-                                           'maxWidth': self.cast[0], 'maxHeight': self.cast[1],
+                                           'maxWidth': mw, 'maxHeight': mh,
                                            'everyNthFrame': 1})
 
     def ack(self, session_id):

@@ -114,6 +114,15 @@ def vt_state_mods(state):
     return mods
 
 
+def augment_printable(key, mods):
+    """Ctrl/Alt held while a character key produced no control code (Ctrl++ on the
+    VT): the character arrives plain, the kernel knows the modifiers."""
+    add = mods & {'ctrl', 'alt'}
+    if not add or len(key) != 1:
+        return key
+    return ''.join(m + '+' for m in ('ctrl', 'alt') if m in add) + key
+
+
 def augment_key(key, mods):
     """Add modifiers the Linux console keymap swallowed (Ctrl+Shift+V arrives as Ctrl+V,
     Shift+Insert as Insert). Only control letters and navigation keys are touched."""
@@ -615,11 +624,16 @@ class Terminal:
         if self.on_vt and evs:
             mods = None
             for ev in evs:
-                if isinstance(ev, Key) and not ev.char:
-                    if mods is None:
-                        mods = vt_state_mods(self.vt_shift_state())
-                    if mods:
-                        k2 = augment_key(ev.key, mods)
-                        if k2 != ev.key:
-                            ev.orig, ev.key = ev.key, k2
+                if not isinstance(ev, Key):
+                    continue
+                if mods is None:
+                    mods = vt_state_mods(self.vt_shift_state())
+                if not mods:
+                    continue
+                if ev.char:
+                    k2 = augment_printable(ev.key, mods)
+                else:
+                    k2 = augment_key(ev.key, mods)
+                if k2 != ev.key:
+                    ev.orig, ev.key = ev.key, k2
         return evs

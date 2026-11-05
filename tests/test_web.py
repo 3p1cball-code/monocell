@@ -109,6 +109,21 @@ class TestPointer(unittest.TestCase):
         self.assertEqual(g.draw_pointer(buf, 10_000, 10_000)[0] % 2, 0)       # stays on screen
 
 
+class TestZoom(unittest.TestCase):
+    def test_steps_are_a_list_and_clamped(self):
+        self.assertEqual(webgfx.step_zoom(1.0, 1), 1.1)
+        self.assertEqual(webgfx.step_zoom(1.0, -1), 0.9)
+        self.assertEqual(webgfx.step_zoom(0.5, -1), 0.5)
+        self.assertEqual(webgfx.step_zoom(3.0, 1), 3.0)
+        self.assertEqual(webgfx.step_zoom(1.04, 1), 1.1)         # snaps to the list first
+
+    def test_ctrl_plus_minus_reset_are_ours(self):
+        for k in ('ctrl++', 'ctrl+=', 'ctrl+-', 'ctrl+0',
+                  'alt++', 'alt+-', 'alt+0'):
+            self.assertTrue(webgfx.is_hotkey(k, True), k)
+            self.assertTrue(webgfx.is_hotkey(k, False), k)
+
+
 class TestHotkeys(unittest.TestCase):
     def test_ctrl_keys_are_always_ours(self):
         for k in ('ctrl+g', 'ctrl+o', 'ctrl+l', 'ctrl+r', 'ctrl+v', 'ctrl+c',

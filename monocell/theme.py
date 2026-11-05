@@ -344,6 +344,7 @@ DEFAULT_CONFIG = {
     'av_offset': 0,               # ms; negative shows the picture earlier than the sound
     'audio_sink': 'auto',         # auto | pw-cat | pacat | aplay
     'web_images': True,
+    'web_zoom': 100,              # browser graphics mode zoom (percent)
     'web_home': 'about:home',
     'search_url': 'https://html.duckduckgo.com/html/?q=%s',
     'chromium': '',

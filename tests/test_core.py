@@ -499,6 +499,16 @@ class TestVTModifiers(unittest.TestCase):
         self.assertEqual(augment_key('enter', {'shift'}), 'enter')
         self.assertEqual(augment_key('f5', {'ctrl'}), 'f5')
 
+    def test_printable_keys_get_ctrl_from_the_vt(self):
+        from monocell.term import augment_printable
+        self.assertEqual(augment_printable('+', {'ctrl'}), 'ctrl++')
+        self.assertEqual(augment_printable('-', {'ctrl'}), 'ctrl+-')
+        self.assertEqual(augment_printable('0', {'ctrl'}), 'ctrl+0')
+        self.assertEqual(augment_printable('A', {'shift'}), 'A')       # shift is in the char
+        self.assertEqual(augment_printable('a', {'shift', 'ctrl'}), 'ctrl+a')
+        self.assertEqual(augment_printable('ä', {'alt'}), 'alt+ä')     # AltGr is not alt
+        self.assertEqual(augment_printable('enter', {'ctrl'}), 'enter')
+
 
 class TestKDEConnect(unittest.TestCase):
     def test_parse_devices(self):

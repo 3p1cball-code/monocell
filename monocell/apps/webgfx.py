@@ -29,6 +29,7 @@ FRAME_GAP = 0.05               # at most ~20 frames a second: the page waits for
 MOVE_GAP = 0.03                # mouse moves to the page, coalesced
 WHEEL_STEP = 120               # pixels per wheel notch
 MIDDLE_STEP = 6.0              # middle button + TrackPoint: screen pixels per scroll step
+ZOOMS = (50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300)   # percent
 
 # classic arrow, '#' outline, '.' fill
 POINTER = [
@@ -49,6 +50,14 @@ def pointer_runs():
 POINTER_RUNS = pointer_runs()
 POINTER_W = max(len(r) for r in POINTER)
 POINTER_H = len(POINTER)
+
+
+def step_zoom(cur, delta):
+    """Next zoom (as a factor) from the list, snapped to the nearest entry first."""
+    pct = int(round(cur * 100))
+    i = min(range(len(ZOOMS)), key=lambda k: abs(ZOOMS[k] - pct))
+    i = max(0, min(len(ZOOMS) - 1, i + int(delta)))
+    return ZOOMS[i] / 100.0
 
 
 def snap_to(v, origin, step, hi):
@@ -73,7 +82,9 @@ def to_screen(ev_x, ev_y, cols, rows, screen):
 def is_hotkey(k, editing):
     """Is key `k` ours (True) or the page's (False)?"""
     if k in ('ctrl+g', 'ctrl+o', 'ctrl+l', 'ctrl+r', 'f5', 'f6', 'alt+left', 'alt+right',
-             'ctrl+v', 'ctrl+c', 'alt+c', 'alt+d', 'alt+s', 'esc'):
+             'ctrl+v', 'ctrl+c', 'alt+c', 'alt+d', 'alt+s', 'esc',
+             'ctrl++', 'ctrl+=', 'ctrl+-', 'ctrl+0',
+             'alt++', 'alt+=', 'alt+-', 'alt+0'):      # Alt works in a terminal too
         return True
     if editing:
         return False
@@ -94,6 +105,8 @@ class WebGfx:
         self.pipe = None
         self.original = False          # starts in the configured retro look (quarter
         #                                resolution); Ctrl+O/o shows the original
+        pct = int(self.wm.cfg.get('web_zoom', 100) or 100)
+        self.zoom = max(0.5, min(3.0, pct / 100.0))
         self.font = None
         self.frame_img = None          # last page picture (PIL, viewport size)
         self.base = None               # frame bytes without the pointer
@@ -162,6 +175,7 @@ class WebGfx:
             if self.closed:
                 p.close()
                 return None
+            p.set_zoom(self.zoom)
             p.start_screencast(80, *self.cast_size())
             try:
                 p.navigate(url)
@@ -249,6 +263,12 @@ class WebGfx:
     def note(self, *extra, secs=3.0):
         if self.sess:
             self.sess.note([self.label()] + [e for e in extra if e], secs)
+
+    def css_point(self, x, y):
+        """Screen pixels -> the CSS coordinates the page expects at this zoom."""
+        W, H = self.page.css_size() if self.page else (1, 1)
+        z = self.zoom
+        return (max(0.0, min(W - 1.0, x / z)), max(0.0, min(H - 1.0, y / z)))
 
     def cast_size(self):
         """Pixels the browser is asked for: the page area in pipeline pixels."""
@@ -432,6 +452,8 @@ class WebGfx:
             return img
         right = ('ORIGINAL' if self.original else fbmode.LOOKS[self.look()[0]][0]) + \
             '  Ctrl+G text  Ctrl+L address'
+        if abs(self.zoom - 1.0) > 1e-3:
+            right = '%d%%  %s' % (round(self.zoom * 100), right)
         rw = len(right) * f.w
         f.draw(img, W - rw - 4, y, right, g.c_dim)
         if self.hover:
@@ -614,13 +636,16 @@ class WebGfx:
             return True
         if ev.kind in ('wheelup', 'wheeldown'):
             if page and not on_bar:
-                page.wheel(x, y, -WHEEL_STEP if ev.kind == 'wheelup' else WHEEL_STEP)
+                cx, cy = self.css_point(x, y)
+                d = (-WHEEL_STEP if ev.kind == 'wheelup' else WHEEL_STEP) / self.zoom
+                page.wheel(cx, cy, d)
             return True
         if ev.button == 1 or (self.middle is not None and ev.kind in ('drag', 'up')):
             return self.middle_scroll(ev, x, y)
         if not page:
             return True
         y = min(y, H - HUD_H - 1)
+        x, y = self.css_point(x, y)
         if ev.kind in ('move', 'drag'):
             self.pending_move = (x, y)
             if not self.move_timer:
@@ -662,7 +687,8 @@ class WebGfx:
             steps = int(self.middle[1] / MIDDLE_STEP)
             if steps and self.page:
                 self.middle[1] -= steps * MIDDLE_STEP
-                self.page.wheel(x, y, steps * WHEEL_STEP // 3)
+                cx, cy = self.css_point(x, y)
+                self.page.wheel(cx, cy, steps * WHEEL_STEP / 3.0 / self.zoom)
         elif ev.kind == 'up':
             self.middle = None
         return True
@@ -759,4 +785,23 @@ class WebGfx:
             self.change('gfx_dither', list(fbmode.DITHERS))
         elif k in ('alt+s', 's'):
             self.change('gfx_scanlines', [False, True])
+        elif k in ('ctrl++', 'ctrl+=', 'alt++', 'alt+='):
+            self.set_zoom(step_zoom(self.zoom, 1))
+        elif k in ('ctrl+-', 'alt+-'):
+            self.set_zoom(step_zoom(self.zoom, -1))
+        elif k in ('ctrl+0', 'alt+0'):
+            self.set_zoom(1.0)
         return True
+
+    def set_zoom(self, z):
+        z = max(ZOOMS[0] / 100.0, min(ZOOMS[-1] / 100.0, z))
+        if abs(z - self.zoom) < 1e-3:
+            return
+        self.zoom = z
+        self.wm.cfg['web_zoom'] = int(round(z * 100))
+        self.wm.cfg.save()
+        if self.page:
+            self.page.set_zoom(z)
+        self.note('ZOOM %d%%' % round(z * 100))
+        if self.loading:
+            self.refresh_hud()
