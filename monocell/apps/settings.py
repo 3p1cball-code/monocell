@@ -1,6 +1,6 @@
 """Settings: appearance editor (palette + element colours), desktop/media/web/calendar options."""
 from ..app import App
-from .. import figlet, gcal
+from .. import figlet, gcal, startup
 from ..theme import (PRESETS, PRESET_FONTS, available_fonts, delete_theme,
                      save_theme, saved_themes)
 from ..util import fit
@@ -8,7 +8,7 @@ from ..widgets import MenuItem, TextField, button
 from .appearance import AppearanceMixin
 
 SECTIONS = [('colors', 'Appearance'), ('desktop', 'Desktop'), ('background', 'Background'),
-            ('media', 'Images & video'), ('maps', 'Maps'), ('web', 'Web'),
+            ('media', 'Images & video'), ('sounds', 'Sounds'), ('maps', 'Maps'), ('web', 'Web'),
             ('calendar', 'Calendar'), ('tools', 'Tools'),
             ('about', 'About')]
 
@@ -45,12 +45,14 @@ OPTIONS = {
          [8, 10, 12, 15, 20, 24, 25, 30, 40, 50, 60, 75, 90, 100, 120, 144, 165, 240]),
         ('av_offset', 'A/V offset ms (negative = picture earlier)',
          [-160, -120, -80, -40, 0, 40, 80, 120]),
-        ('audio_sink', 'Audio output', ['auto', 'pacat', 'pw-cat', 'aplay']),
         ('gfx_look', 'Graphics mode look (g in the player)',
          ['vga', 'ega', 'theme', 'cga', 'amber', 'green']),
         ('gfx_dither', 'Graphics dithering', ['bayer', 'none']),
         ('gfx_scanlines', 'Graphics scanlines', [False, True]),
         ('gfx_fps', 'Graphics frame rate (0 = auto)', [0, 12, 15, 20, 25, 30]),
+    ],
+    'sounds': [
+        ('audio_sink', 'Audio output', ['auto', 'pacat', 'pw-cat', 'aplay']),
     ],
     'maps': [
         ('map_tiles', 'Tile source (preset or {z}/{x}/{y} URL)', 'text'),
@@ -109,6 +111,8 @@ class Settings(AppearanceMixin, App):
         self.edit = None          # (key, TextField) for text options
         self.drag_chan = None
         self.opt_sel = 0
+        self.sound_sel = 0            # selected row in the Sounds list
+        self.sound_scroll = 0
         self.saved = saved_themes()   # user themes from the theme folder
         self.theme_pos = (12, 0)     # body coords of the theme button, for the popup
         self.init_appearance()
@@ -270,7 +274,7 @@ class Settings(AppearanceMixin, App):
         self.zone_off = (self.body_x, 0)
         body = cv.sub(nav + 2, 0, w - nav - 2, h)
         try:
-            getattr(self, 'draw_' + (self.section if self.section in ('colors', 'about') else 'options'))(body, focused)
+            getattr(self, 'draw_' + (self.section if self.section in ('colors', 'about', 'sounds') else 'options'))(body, focused)
         finally:
             self.zone_off = (0, 0)
 
@@ -361,6 +365,79 @@ class Settings(AppearanceMixin, App):
             for i, ln in enumerate(wrap_text(txt, cv.w)):
                 cv.put(0, y + i, ln, th.c('dim', 'win'))
 
+    # ------------------------------------------------------------ sounds
+    def apply_sound(self):
+        """Save sound choices without reloading the theme/font."""
+        self.cfg.save()
+        self.invalidate()
+
+    def sound_rows(self):
+        return startup.rows()
+
+    def draw_sounds(self, cv, focused):
+        from ..util import wrap_text
+        th = self.th
+        cv.put(0, 0, 'Sounds', th.c('bright', 'win', 1))
+        y = 2
+        lw = 40
+        cv.put(0, y, fit('Audio output', lw), th.c('text', 'win'))
+        val = self.cfg.get('audio_sink', 'auto')
+        hov = self.hover == ('opt', 'audio_sink')
+        a = th.c('on_accent', 'accent') if hov else th.c('accent', 'raised')
+        cv.put(lw, y, ' < %s > ' % val, a)
+        self.zone(lw, y, len(str(val)) + 6, 1, ('opt', 'audio_sink'))
+        y += 2
+
+        rows = self.sound_rows()
+        n = len(rows)
+        self.sound_sel = max(0, min(self.sound_sel, n - 1))
+        cur = startup.current(self.cfg)
+        vis = max(3, cv.h - y - 4)      # keep room for description + button line
+        if self.sound_sel < self.sound_scroll:
+            self.sound_scroll = self.sound_sel
+        if self.sound_sel >= self.sound_scroll + vis:
+            self.sound_scroll = self.sound_sel - vis + 1
+        self.sound_scroll = max(0, min(self.sound_scroll, max(0, n - vis)))
+        for i in range(self.sound_scroll, min(n, self.sound_scroll + vis)):
+            sid, title, desc = rows[i]
+            yy = y + (i - self.sound_scroll)
+            sel = i == self.sound_sel
+            active = sid == cur
+            fg = th.c('on_accent', 'accent') if sel else (th.c('bright', 'win') if active else th.c('text', 'win'))
+            if sel:
+                cv.fill(0, yy, cv.w, 1, th.c('on_accent', 'accent'))
+            cv.put(0, yy, '>' if sel else ('*' if active else ' '), fg)
+            cv.put(2, yy, fit(title, 18), fg)
+            cv.put(21, yy, fit(desc, max(0, cv.w - 21)), fg if sel else th.c('dim', 'win'))
+            self.zone(0, yy, cv.w, 1, ('snd', i))
+        dy = y + vis + 1
+        lines = wrap_text(rows[self.sound_sel][2], cv.w)
+        for j, ln in enumerate(lines[:2]):
+            if dy + j < cv.h - 1:
+                cv.put(0, dy + j, ln, th.c('dim', 'win'))
+        button(self, cv, 0, cv.h - 1, 'Probe', 'probe')
+        hint = 'Enter = use   p = preview   left/right = audio output'
+        cv.put(8, cv.h - 1, fit(hint, cv.w - 8), th.c('dim', 'win'))
+
+    def choose_sound(self):
+        rows = self.sound_rows()
+        if not rows:
+            return
+        sid, title, _desc = rows[self.sound_sel]
+        self.cfg['startup_sound'] = sid
+        self.cfg.save()
+        self.wm.toast('Startup sound: %s' % (title if sid else 'off'), 'green')
+        self.invalidate()
+
+    def preview_sound(self):
+        rows = self.sound_rows()
+        sid = rows[self.sound_sel][0]
+        if not sid:
+            self.wm.toast('No startup sound selected')
+            return
+        if startup.play(self.cfg, delay=0, sound=sid, force=True) is None:
+            self.wm.toast('Startup sound not installed', 'red')
+
     def preview(self, cv, x, y, w, h):
         from .. import imaging
         img = getattr(self, '_prev_img', None)
@@ -419,7 +496,7 @@ class Settings(AppearanceMixin, App):
                     cur = self.cfg.get(k)
                     i = kind.index(cur) if cur in kind else -1
                     self.cfg[k] = kind[(i + d) % len(kind)]
-                    self.apply()
+                    self.apply_sound() if k == 'audio_sink' else self.apply()
                 elif kind == 'file':
                     def ok(path, k=k):
                         self.cfg[k] = path
@@ -454,6 +531,11 @@ class Settings(AppearanceMixin, App):
                 if o[0] == key[1]:
                     self.opt_sel = i
             self.cycle_opt(key[1], -1 if ev.button == 2 else 1)
+        elif key[0] == 'snd':
+            self.sound_sel = key[1]
+            self.choose_sound()
+        elif key == 'probe':
+            self.preview_sound()
         elif key == 'help':
             self.wm.show_help()
 
@@ -500,6 +582,24 @@ class Settings(AppearanceMixin, App):
             self.opt_sel = 0
         elif self.section == 'colors':
             if not self.appearance_key(k):
+                return False
+        elif self.section == 'sounds':
+            rows = self.sound_rows()
+            if not rows:
+                return False
+            if k == 'up':
+                self.sound_sel = (self.sound_sel - 1) % len(rows)
+            elif k == 'down':
+                self.sound_sel = (self.sound_sel + 1) % len(rows)
+            elif k in ('enter', ' '):
+                self.choose_sound()
+            elif k == 'p':
+                self.preview_sound()
+            elif k == 'left':
+                self.cycle_opt('audio_sink', -1)
+            elif k == 'right':
+                self.cycle_opt('audio_sink', 1)
+            else:
                 return False
         elif self.section in OPTIONS:
             opts = self.options()

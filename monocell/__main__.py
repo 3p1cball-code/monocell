@@ -100,6 +100,11 @@ def main(argv=None):
             open_path(wm, os.path.abspath(f))
         if args.tile:
             wm.tile()
+        try:
+            from . import startup
+            startup.play(cfg)
+        except Exception:
+            util.log('startup sound unavailable: ' + traceback.format_exc())
         loop.run(idle)
     except KeyboardInterrupt:
         pass

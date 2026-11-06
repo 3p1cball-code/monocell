@@ -313,6 +313,7 @@ DEFAULT_CONFIG = {
     'clock_seconds': False,
     'clock_24h': True,
     'desktop_logo': False,
+    'startup_sound': 'win95',      # id from monocell.startup; '' = off (file optional)
     'media_prompt': False,        # ask before mounting a newly plugged-in medium (off: Files only)
     'battery_suspend': True,      # at 3% on battery: suspend (a toast announces it)
     'wallpaper': '',
