@@ -160,10 +160,27 @@ REGISTRY = [
     ('music', 'music', 'Music', '(~)', 'Music player', 'Media'),
     ('snake', 'snake', 'Snake', '[S]', 'Classic snake', 'Games'),
     ('jump', 'jump', 'Jump', '[J]', 'Tiny platformer', 'Games'),
+    ('crawl', 'game', 'Dungeon Crawl', '[C]', 'DCSS 0.28 (Roguelike)', 'Games'),
+    ('cataclysm', 'game', 'Cataclysm', '[Z]', 'Dark Days Ahead 0.H', 'Games'),
+    ('brogue', 'game', 'Brogue', '[B]', 'Brogue CE (Roguelike)', 'Games'),
+    ('nethack', 'game', 'NetHack', '[N]', 'NetHack 3.6.7', 'Games'),
+    ('doom', 'game', 'Doom (Text)', '[D]', 'DOOM ASCII (Freedoom)', 'Games'),
+    ('doom-gfx', 'game', 'Doom (Grafik)', '[D]', 'Chocolate Doom (KMS/DRM)', 'Games'),
+    ('quake3', 'game', 'Quake 3 Arena', '[Q]', 'ioquake3 (Retail-Daten nötig)', 'Games'),
+    ('openarena', 'game', 'OpenArena', '[Q]', 'freier Quake-3-Shooter', 'Games'),
+    ('vitetris', 'game', 'vitetris', '[T]', 'Tetris', 'Games'),
+    ('nudoku', 'game', 'Nudoku', '[9]', 'Sudoku', 'Games'),
+    ('freesweep', 'game', 'FreeSweep', '[F]', 'Minesweeper', 'Games'),
+    ('solitaire', 'game', 'Solitaire', '[S]', 'Klondike', 'Games'),
+    ('pacman', 'game', 'Pac-Man', '[P]', 'pacman4console', 'Games'),
+    ('ninvaders', 'game', 'nInvaders', '[I]', 'Space Invaders', 'Games'),
+    ('moonbuggy', 'game', 'Moon Buggy', '[M]', 'Moon Buggy', 'Games'),
+    ('halflife', 'game', 'Half-Life', '[H]', 'Half-Life (Xash3D)', 'Games'),
     ('system', 'system', 'System', '[i]', 'System monitor', 'System'),
     ('bench', 'bench', 'Pi Benchmark', '[%]', 'CPU load with temp & fan graphs', 'System'),
     ('selftest', 'selftest', 'Systemtest', '[!]', 'Alle Hardware erkennen und prüfen', 'System'),
     ('network', 'network', 'Network', ')))', 'Wi-Fi networks & signal', 'System'),
+    ('bluetooth', 'bluetooth', 'Bluetooth', '[B]', 'Pair & connect Bluetooth devices', 'System'),
     ('updates', 'updates', 'Updates', '[u]', 'Look for and install Debian updates', 'System'),
     ('kdeconnect', 'kdeconnect', 'KDE Connect', '[K]', 'Clipboard & file transfer', 'System'),
     ('settings', 'settings', 'Settings', '{o}', 'Settings', 'System'),
@@ -183,4 +200,7 @@ def app_info(name):
 def load_app(name):
     row = app_info(name)
     mod = importlib.import_module('monocell.apps.' + (row[1] if row else name))
+    apps = getattr(mod, 'APPS', None)
+    if apps is not None:
+        return apps[row[0] if row else name]
     return mod.APP

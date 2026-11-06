@@ -152,7 +152,8 @@ class TestUtil(unittest.TestCase):
         self.assertEqual(nets[0]['signal'], 80)
         self.assertTrue(nets[0]['in_use'])
         self.assertEqual(nets[1]['security'], '')
-        self.assertEqual(portal_address('WIFIonICE'), 'http://wifi.bahn.de/')
+        self.assertEqual(portal_address('WIFIonICE'), 'http://login.wifionice.de/')
+        self.assertEqual(portal_address('WIFI@DB'), 'http://wifi.bahn.de/')
         self.assertEqual(portal_address('Hotel', '10.0.0.1'), 'http://10.0.0.1/')
         self.assertEqual(portal_address('Hotel'), 'http://neverssl.com/')
 

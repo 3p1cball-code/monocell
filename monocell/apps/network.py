@@ -1,4 +1,5 @@
 """Network: wifi networks, signal, connect/disconnect and the radio switch."""
+import re
 import subprocess
 
 from .. import hardware
@@ -27,10 +28,20 @@ def terse_fields(line):
     return out
 
 
-def portal_address(connection, gateway=None):
-    """URL that a captive portal will intercept: known ICE portal or the gateway."""
+def known_portal(connection):
+    """True for the German rail networks (their login page must be opened by hand)."""
     low = (connection or '').lower()
-    if 'ice' in low or 'bahn' in low:
+    return ('wifionice' in low or 'wifi on ice' in low or 'wifi@db' in low
+            or 'bahn' in low or bool(re.search(r'\bice\b', low)))
+
+
+def portal_address(connection, gateway=None):
+    """URL that a captive portal will intercept: rail login, gateway or neverssl."""
+    low = (connection or '').lower()
+    if ('wifionice' in low or 'wifi on ice' in low
+            or re.search(r'\bice\b', low)):
+        return 'http://login.wifionice.de/'
+    if 'wifi@db' in low or 'bahn' in low:
         return 'http://wifi.bahn.de/'
     return 'http://%s/' % gateway if gateway else 'http://neverssl.com/'
 
@@ -181,19 +192,22 @@ class Network(App):
         else:
             self.connect_with(net, '')
 
-    def portal_url(self):
+    def portal_name(self):
         name = self.state.get('connection') or ''
         for n in self.networks:
             if n.get('in_use'):
                 name += ' ' + n['ssid']
                 break
-        return portal_address(name, hardware.default_gateway())
+        return name
+
+    def portal_url(self):
+        return portal_address(self.portal_name(), hardware.default_gateway())
 
     def open_portal(self):
         if not self.state.get('connection'):
             self.wm.toast('Connect to a network first', 'yellow')
             return
-        self.wm.open('browser', url=self.portal_url())
+        self.wm.open('browser', url=self.portal_url(), gfx=True)
 
     def connect_with(self, net, password):
         if self.busy:
@@ -214,7 +228,8 @@ class Network(App):
         st = self.state
         conn = st.get('connection') or ''
         on = st.get('radio', True)
-        portal = conn and st.get('connectivity') in ('portal', 'limited')
+        portal = conn and (st.get('connectivity') in ('portal', 'limited')
+                           or known_portal(self.portal_name()))
         cv.put(1, 0, 'Network', th.c('accent', 'win', 1))
         chip = 'sign-in' if portal else 'connected' if conn else 'disconnected'
         col = 'yellow' if portal else 'accent' if conn else 'dim'
@@ -239,8 +254,8 @@ class Network(App):
         x += button(self, cv, x, 3, 'Wi-Fi off' if on else 'Wi-Fi on', 'radio') + 1
         if conn:
             x += button(self, cv, x, 3, 'Disconnect', 'off') + 1
-            x += button(self, cv, x, 3, 'Portal', 'portal',
-                        primary=bool(portal)) + 1
+            label = 'Bahn WLAN' if known_portal(self.portal_name()) else 'Portal'
+            x += button(self, cv, x, 3, label, 'portal', primary=bool(portal)) + 1
         y = 5
         cv.put(1, 4, '%d networks' % len(self.networks), th.c('dim', 'win'))
 

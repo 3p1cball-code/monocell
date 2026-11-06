@@ -21,19 +21,5 @@ The VGA, Terminus and Fixed files are copies from the Debian
 console-setup package; their copyright and license information is in
 /usr/share/doc/console-setup/copyright (copyright.fonts on Debian).
 
-figlet/*.flf
-    FIGlet fonts for the Writer's large text: Graceful (Mikhael Goikhman,
-    2002; "permission is hereby given to modify this font, as long as the
-    modifier's name is added to this comment"), and Standard, Small, Slant
-    and Big by Glenn Chappell & Ian Chai from the figlet distribution.
-
 Add your own PSF/PSF.GZ files to ~/.local/share/monocell/fonts and they
-appear in Settings -> Appearance -> Theme -> Font. Own .flf files go to
-~/.local/share/monocell/figlet (Settings -> Tools -> Writer big/huge text).
-
-Note on Lat15-3270.psf.gz: the 3270 font draws '=' as two bars that the
-16-pixel hinting merges into a single line when converted with bdf2psf. The
-glyph is therefore patched by tools/fix_psf_equals.py (two bars, rows 5 and
-9), so '=' and the Writer's double underline are visible. The same script
-repairs /usr/share/consolefonts/Lat15-3270.psf.gz (needs root) if that copy
-is used for the login prompt.
+appear in Settings -> Appearance -> Theme -> Font.

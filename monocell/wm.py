@@ -112,7 +112,10 @@ class Rain:
 
 
 class StartMenu:
-    """Start menu popup with type-to-search and scrolling on small screens."""
+    """Start menu: one row per category, each opens a submenu to the right.
+
+    Typing filters all apps into a flat list (no categories, no submenu).
+    """
 
     def __init__(self, wm):
         self.wm = wm
@@ -122,9 +125,39 @@ class StartMenu:
         self.top = 0
         self.hover = None
         self.closed = False
+        self.sub_cat = None
+        self.sub_sel = 0
+        self.sub_top = 0
+        self.sub_label_w = 0
         self.layout()
 
+    # ---------------------------------------------------------- rows
+    @staticmethod
+    def foot_rows():
+        return [('foot', 'help', 'Help & shortcuts'),
+                ('foot', 'screenshot', 'Text screenshot'),
+                ('foot', 'lock', 'Lock screen'),
+                ('foot', 'suspend', 'Suspend'),
+                ('foot', 'exit', 'Exit monocell'),
+                ('foot', 'reboot', 'Reboot'),
+                ('foot', 'shutdown', 'Shut down')]
+
+    def categories(self):
+        out = []
+        for name, mod, label, icon, desc, cat in REGISTRY:
+            if not out or out[-1][0] != cat:
+                out.append((cat, []))
+            out[-1][1].append((name, label, icon, desc))
+        return out
+
+    def main_rows(self):
+        rows = [('cat', cat, apps) for cat, apps in self.categories()]
+        rows.append(('sep',))
+        rows += self.foot_rows()
+        return rows
+
     def all_rows(self):
+        """All apps, optionally filtered by the search text (flat list)."""
         q = self.search.text.lower().strip()
         out = []
         last = None
@@ -135,92 +168,105 @@ class StartMenu:
                 out.append(('hdr', cat))
                 last = cat
             out.append(('app', name, label, icon, desc))
+        if q and not any(r[0] == 'app' for r in out):
+            out.append(('hdr', 'no matches'))
         out.append(('sep',))
-        out += [('foot', 'help', 'Help & shortcuts'), ('foot', 'screenshot', 'Text screenshot'),
-                ('foot', 'lock', 'Lock screen'), ('foot', 'suspend', 'Suspend'),
-                ('foot', 'exit', 'Exit monocell'),
-                ('foot', 'reboot', 'Reboot'), ('foot', 'shutdown', 'Shut down')]
+        out += self.foot_rows()
         return out
 
-    def selectable(self):
-        return [i for i, r in enumerate(self.all_rows()) if r[0] in ('app', 'foot')]
+    def rows(self):
+        return self.all_rows() if self.search.text.strip() else self.main_rows()
 
+    def selectable(self):
+        return [i for i, r in enumerate(self.rows()) if r[0] in ('app', 'cat', 'foot')]
+
+    def current_row(self):
+        rows = self.rows()
+        sel = self.selectable()
+        return rows[sel[self.sel]] if sel else None
+
+    def sub_apps(self):
+        if not self.sub_cat:
+            return []
+        for kind, cat, apps in self.main_rows():
+            if kind == 'cat' and cat == self.sub_cat:
+                return apps
+        return []
+
+    # ---------------------------------------------------------- geometry
     def layout(self):
         wm = self.wm
-        self.w = min(wm.w, 56 if wm.w >= 120 else 36)
-        self.avail = max(4, min(wm.desk_h - 4, len(self.all_rows())))
+        if self.search.text.strip():
+            width = 52 if wm.w >= 100 else 36
+        else:
+            width = 7 + max(len(r[2]) for r in self.foot_rows()) + 2
+        self.w = min(wm.w, width)
+        self.avail = max(4, min(wm.desk_h - 4, len(self.rows())))
         self.h = min(wm.desk_h, self.avail + 4)
         self.avail = self.h - 4
         self.x = 0
         self.y = wm.desk_y + wm.desk_h - self.h if wm.cfg['taskbar'] == 'bottom' else wm.desk_y
 
-    def contains(self, mx, my):
+    def main_contains(self, mx, my):
         return self.x <= mx < self.x + self.w and self.y <= my < self.y + self.h
 
-    def draw(self, cv):
-        th = self.th
-        self.layout()
-        rows = self.all_rows()
-        sel = self.selectable()
-        if sel:
-            self.sel = max(0, min(self.sel, len(sel) - 1))
-            cur = sel[self.sel]
-        else:
-            cur = -1
-        # keep the selected row visible
-        if cur >= 0:
-            if cur < self.top:
-                self.top = cur
-            elif cur >= self.top + self.avail:
-                self.top = cur - self.avail + 1
-        maxtop = max(0, len(rows) - self.avail)
-        self.top = max(0, min(self.top, maxtop))
-        x, y, w, h = self.x, self.y, self.w, self.h
-        if self.wm.cfg['shadows']:
-            self.wm.shade(cv, x + w, y + 1, 1, h)
-        cv.fill(x, y, w, h, th.c('text', 'menu'))
-        cv.fill(x, y, 1, h, th.c('text', 'accent'))
-        cv.put(x + 2, y + 1, fit('monocell', 12), th.c('accent', 'menu', 1))
-        host = fit(getattr(self.wm, 'hostname', '') or '', max(0, w - 16), align='right')
-        if host:
-            cv.put(x + w - 1 - len(host), y + 1, host, th.c('dim', 'menu'))
-        self.search.draw(cv, x + 2, y + 2, w - 3, th, True, bg='field')
-        for i in range(self.avail):
-            idx = self.top + i
-            if idx >= len(rows):
+    def sub_geom(self):
+        apps = self.sub_apps()
+        if not apps or self.search.text.strip():
+            return None
+        rows = self.rows()
+        idx = None
+        for i, r in enumerate(rows):
+            if r[0] == 'cat' and r[1] == self.sub_cat:
+                idx = i
                 break
-            r = rows[idx]
-            ry = y + 4 + i
-            if r[0] == 'hdr':
-                cv.put(x + 2, ry, r[1].upper(), th.c('dim', 'menu'))
-            elif r[0] == 'sep':
-                cv.hline(x + 2, ry, w - 3, th.c('sel', 'menu'), '-')
-            elif r[0] == 'app':
-                on = idx == cur
-                a = th.c('on_accent', 'accent') if on else th.c('text', 'menu')
-                cv.fill(x + 1, ry, w - 1, 1, a)
-                cv.put(x + 2, ry, sym(r[1], r[3]), a if on else th.c('accent', 'menu'))
-                cv.put(x + 7, ry, fit(r[2], 17), a if on else th.c('bright', 'menu'))
-                d = r[4] if r[4] != r[2] else ''
-                if d and w >= 46:
-                    cv.put(x + 24, ry, fit(d, w - 26), a if on else th.c('dim', 'menu'))
-            elif r[0] == 'foot':
-                on = idx == cur
-                a = th.c('on_accent', 'accent') if on else th.c('text', 'menu')
-                cv.fill(x + 1, ry, w - 1, 1, a)
-                icon = {'help': ' ? ', 'screenshot': ' * ', 'lock': ' # ', 'suspend': ' z ',
-                        'exit': ' x ', 'reboot': ' ^ ', 'shutdown': ' v '}[r[1]]
-                cv.put(x + 2, ry, icon, a if on else th.c('accent', 'menu'))
-                cv.put(x + 7, ry, r[2], a)
-        if len(rows) > self.avail:
-            scrollbar(cv, x + w - 1, y + 4, self.avail, len(rows), self.avail, self.top, th, bg='menu')
+        if idx is None:
+            return None
+        wm = self.wm
+        sx = self.x + self.w
+        label_w = max(len(a[1]) for a in apps)
+        desc_w = max([len(a[3]) for a in apps if a[3] != a[1]] or [0])
+        need = 7 + label_w + (2 + desc_w if desc_w else 0) + 1
+        sw = max(22, need)
+        sw = min(sw, 52, wm.w - sx)
+        self.sub_label_w = label_w
+        sh = min(len(apps) + 1, wm.desk_h)
+        sy = self.y + 4 + (idx - self.top)
+        bottom = wm.desk_y + wm.desk_h
+        if sy + sh > bottom:
+            sy = bottom - sh
+        sy = max(wm.desk_y, sy)
+        return sx, sy, sw, sh
+
+    def in_sub(self, mx, my):
+        g = self.sub_geom()
+        return bool(g and g[0] <= mx < g[0] + g[2] and g[1] <= my < g[1] + g[3])
+
+    def contains(self, mx, my):
+        return self.main_contains(mx, my) or self.in_sub(mx, my)
+
+    def sub_pages(self):
+        g = self.sub_geom()
+        return max(1, (g[3] - 1) if g else 5)
+
+    def open_sub(self, cat):
+        if cat != self.sub_cat:
+            self.sub_sel = 0
+            self.sub_top = 0
+        self.sub_cat = cat
+
+    # ---------------------------------------------------------- actions
+    def launch(self, name):
+        self.wm.close_popup(self)
+        self.wm.open(name)
 
     def activate(self):
-        rows = self.all_rows()
-        sel = self.selectable()
-        if not sel:
+        r = self.current_row()
+        if not r:
             return
-        r = rows[sel[self.sel]]
+        if r[0] == 'cat':
+            self.open_sub(r[1])
+            return
         self.wm.close_popup(self)
         if r[0] == 'app':
             self.wm.open(r[1])
@@ -240,42 +286,222 @@ class StartMenu:
         elif r[1] == 'shutdown':
             self.wm.confirm_shutdown()
 
+    # ---------------------------------------------------------- drawing
+    def draw(self, cv):
+        th = self.th
+        self.layout()
+        rows = self.rows()
+        sel = self.selectable()
+        if sel:
+            self.sel = max(0, min(self.sel, len(sel) - 1))
+            cur = sel[self.sel]
+        else:
+            cur = -1
+        if cur >= 0:
+            if cur < self.top:
+                self.top = cur
+            elif cur >= self.top + self.avail:
+                self.top = cur - self.avail + 1
+        maxtop = max(0, len(rows) - self.avail)
+        self.top = max(0, min(self.top, maxtop))
+        x, y, w, h = self.x, self.y, self.w, self.h
+        if self.wm.cfg['shadows']:
+            self.wm.shade(cv, x + w, y + 1, 1, h)
+        cv.fill(x, y, w, h, th.c('text', 'menu'))
+        cv.fill(x, y, 1, h, th.c('text', 'accent'))
+        cv.put(x + 2, y + 1, fit('monocell', 12), th.c('accent', 'menu', 1))
+        host = fit(getattr(self.wm, 'hostname', '') or '', max(0, w - 16), align='right')
+        if host:
+            cv.put(x + w - 1 - len(host), y + 1, host, th.c('dim', 'menu'))
+        self.search.draw(cv, x + 2, y + 2, w - 3, th, not self.sub_cat, bg='field')
+        for i in range(self.avail):
+            idx = self.top + i
+            if idx >= len(rows):
+                break
+            r = rows[idx]
+            ry = y + 4 + i
+            if r[0] == 'hdr':
+                cv.put(x + 2, ry, r[1].upper(), th.c('dim', 'menu'))
+            elif r[0] == 'sep':
+                cv.hline(x + 2, ry, w - 3, th.c('sel', 'menu'), '-')
+            elif r[0] == 'cat':
+                on = idx == cur
+                a = th.c('on_accent', 'accent') if on else th.c('text', 'menu')
+                cv.fill(x + 1, ry, w - 1, 1, a)
+                cv.put(x + 2, ry, r[1], a if on else th.c('bright', 'menu'))
+                if w >= 18:
+                    cv.put(x + w - 7, ry, '%2d' % len(r[2]),
+                           a if on else th.c('dim', 'menu'))
+                cv.put(x + w - 3, ry, '>', a if on else th.c('accent', 'menu'))
+            elif r[0] == 'app':
+                on = idx == cur
+                a = th.c('on_accent', 'accent') if on else th.c('text', 'menu')
+                cv.fill(x + 1, ry, w - 1, 1, a)
+                cv.put(x + 2, ry, sym(r[1], r[3]), a if on else th.c('accent', 'menu'))
+                cv.put(x + 7, ry, fit(r[2], 17), a if on else th.c('bright', 'menu'))
+                d = r[4] if r[4] != r[2] else ''
+                if d and w >= 46:
+                    cv.put(x + 24, ry, fit(d, w - 26), a if on else th.c('dim', 'menu'))
+            elif r[0] == 'foot':
+                on = idx == cur
+                a = th.c('on_accent', 'accent') if on else th.c('text', 'menu')
+                cv.fill(x + 1, ry, w - 1, 1, a)
+                icon = {'help': ' ? ', 'screenshot': ' * ', 'lock': ' # ', 'suspend': ' z ',
+                        'exit': ' x ', 'reboot': ' ^ ', 'shutdown': ' v '}[r[1]]
+                cv.put(x + 2, ry, icon, a if on else th.c('accent', 'menu'))
+                cv.put(x + 7, ry, r[2], a)
+        if len(rows) > self.avail:
+            scrollbar(cv, x + w - 1, y + 4, self.avail, len(rows), self.avail, self.top,
+                      th, bg='menu')
+        if self.sub_cat:
+            self.draw_sub(cv)
+
+    def draw_sub(self, cv):
+        g = self.sub_geom()
+        if not g:
+            return
+        th = self.th
+        wm = self.wm
+        sx, sy, sw, sh = g
+        apps = self.sub_apps()
+        avail = sh - 1
+        self.sub_sel = max(0, min(self.sub_sel, len(apps) - 1))
+        if self.sub_sel < self.sub_top:
+            self.sub_top = self.sub_sel
+        elif self.sub_sel >= self.sub_top + avail:
+            self.sub_top = self.sub_sel - avail + 1
+        self.sub_top = max(0, min(self.sub_top, max(0, len(apps) - avail)))
+        if wm.cfg['shadows']:
+            wm.shade(cv, sx + 1, sy + sh, sw, 1)
+            wm.shade(cv, sx + sw, sy + 1, 1, sh)
+        cv.fill(sx, sy, sw, sh, th.c('text', 'menu'))
+        cv.put(sx + 2, sy, fit(self.sub_cat.upper(), sw - 4), th.c('dim', 'menu'))
+        for i in range(avail):
+            j = self.sub_top + i
+            if j >= len(apps):
+                break
+            name, label, icon, desc = apps[j]
+            ry = sy + 1 + i
+            on = j == self.sub_sel
+            a = th.c('on_accent', 'accent') if on else th.c('text', 'menu')
+            cv.fill(sx + 1, ry, sw - 1, 1, a)
+            cv.put(sx + 2, ry, sym(name, icon), a if on else th.c('accent', 'menu'))
+            cv.put(sx + 7, ry, fit(label, self.sub_label_w),
+                   a if on else th.c('bright', 'menu'))
+            dx = 7 + self.sub_label_w + 2
+            if desc and desc != label and sw - dx > 3:
+                cv.put(sx + dx, ry, fit(desc, sw - dx - 1),
+                       a if on else th.c('dim', 'menu'))
+        if len(apps) > avail:
+            scrollbar(cv, sx + sw - 1, sy + 1, avail, len(apps), avail, self.sub_top,
+                      th, bg='menu')
+
+    # ---------------------------------------------------------- input
     def on_key(self, ev):
         k = ev.key
-        n = len(self.selectable())
-        if k in ('esc', 'f12', 'alt+ '):
+        if k in ('f12', 'alt+ '):
             self.wm.close_popup(self)
-        elif k == 'up':
+            return True
+        if self.sub_cat:
+            if k in ('esc', 'left'):
+                self.sub_cat = None
+                return True
+            apps = self.sub_apps()
+            n = len(apps)
+            if k in ('up', 'shift+tab'):
+                self.sub_sel = (self.sub_sel - 1) % max(1, n)
+            elif k in ('down', 'tab'):
+                self.sub_sel = (self.sub_sel + 1) % max(1, n)
+            elif k in ('pgup', 'pgdn'):
+                d = -self.sub_pages() if k == 'pgup' else self.sub_pages()
+                self.sub_sel = max(0, min(n - 1, self.sub_sel + d))
+            elif k == 'home':
+                self.sub_sel = 0
+            elif k == 'end':
+                self.sub_sel = max(0, n - 1)
+            elif k == 'enter':
+                if 0 <= self.sub_sel < n:
+                    self.launch(apps[self.sub_sel][0])
+            elif ev.char or k in ('backspace', 'delete', 'ctrl+u', 'ctrl+w', 'ctrl+a'):
+                self.sub_cat = None
+                self.sel = self.top = 0
+            else:
+                return True
+            if self.sub_cat:
+                return True
+        n = len(self.selectable())
+        if k in ('esc',):
+            self.wm.close_popup(self)
+        elif k in ('up', 'shift+tab'):
             self.sel = (self.sel - 1) % max(1, n)
         elif k in ('down', 'tab'):
             self.sel = (self.sel + 1) % max(1, n)
         elif k in ('pgup', 'pgdn'):
-            self.sel = max(0, min(n - 1, self.sel + (-self.avail + 1 if k == 'pgup' else self.avail - 1)))
+            step = -self.avail + 1 if k == 'pgup' else self.avail - 1
+            self.sel = max(0, min(n - 1, self.sel + step))
         elif k in ('home', 'end'):
             self.sel = 0 if k == 'home' else max(0, n - 1)
-        elif k == 'enter':
-            self.activate()
+        elif k in ('left', 'right') and self.search.text:
+            self.search.key(ev)
+        elif k in ('right', 'enter'):
+            r = self.current_row()
+            if r and r[0] == 'cat':
+                self.open_sub(r[1])
+            else:
+                self.activate()
+        elif k == 'left':
+            pass
         elif self.search.key(ev):
             self.sel = 0
             self.top = 0
+            self.sub_cat = None
         return True
 
     def on_paste(self, text):
         self.search.insert(text)
+        self.sel = self.top = 0
+        self.sub_cat = None
 
     def on_mouse(self, ev):
-        rows = self.all_rows()
+        rows = self.rows()
         sel = self.selectable()
-        if ev.kind in ('wheelup', 'wheeldown') and self.contains(ev.x, ev.y):
+        g = self.sub_geom()
+        if g and g[0] <= ev.x < g[0] + g[2] and g[1] <= ev.y < g[1] + g[3]:
+            apps = self.sub_apps()
+            avail = g[3] - 1
+            if ev.kind in ('wheelup', 'wheeldown'):
+                d = -2 if ev.kind == 'wheelup' else 2
+                self.sub_top = max(0, min(max(0, len(apps) - avail), self.sub_top + d))
+                return True
+            j = ev.y - (g[1] + 1) + self.sub_top
+            if 0 <= j < len(apps):
+                if ev.kind in ('move', 'drag'):
+                    if self.sub_sel != j:
+                        self.sub_sel = j
+                        self.wm.dirty = True
+                elif ev.kind == 'up' and ev.button == 0:
+                    self.sub_sel = j
+                    self.launch(apps[j][0])
+            return True
+        if not self.main_contains(ev.x, ev.y):
+            return True
+        if ev.kind in ('wheelup', 'wheeldown'):
             d = -2 if ev.kind == 'wheelup' else 2
             self.top = max(0, min(max(0, len(rows) - self.avail), self.top + d))
             return True
         i = ev.y - (self.y + 4)
         idx = self.top + i
-        if 0 <= i < self.avail and idx in sel and self.x < ev.x < self.x + self.w:
-            if ev.kind in ('move', 'drag'):
+        if 0 <= i < self.avail and idx < len(rows) and idx in sel:
+            r = rows[idx]
+            if r[0] == 'cat':
                 self.sel = sel.index(idx)
-            elif ev.kind == 'up':
+                self.open_sub(r[1])
+            elif r[0] == 'foot':
+                self.sel = sel.index(idx)
+                self.sub_cat = None
+                if ev.kind == 'up':
+                    self.activate()
+            elif r[0] == 'app' and ev.kind == 'up':
                 self.sel = sel.index(idx)
                 self.activate()
         return True
@@ -1569,6 +1795,8 @@ class WM:
             self.change_brightness(-1, notify=not self.panel_open('brightness'))
         elif action == 'wifi':
             self.open('network')
+        elif action == 'bluetooth':
+            self.open('bluetooth')
         elif action == 'battery':
             self.open('system')
         elif action == 'files':
@@ -2237,7 +2465,7 @@ class WM:
             else:
                 self.toast('LAN %s%s' % (name, ('  ' + ip) if ip else ''))
         elif key == 'bt':
-            self.toast('Bluetooth: ' + ('on' if self.bt else 'off'))
+            self.open('bluetooth')
         elif key == 'bright':
             self.open_panel('brightness', ev.x)
         elif key == 'sound':
@@ -2386,7 +2614,7 @@ class WM:
 
 HELP_TEXT = """Mouse: drag title bars to move, drag edges/corners to resize, double-click a title to maximize. Drag a window to the screen top to maximize, to the left/right edge to tile half, to a corner for a quarter. Alt+drag moves from anywhere. Right-click title bars, the taskbar or the desktop for menus.
 
-F12 / Alt+Space   start menu (type to search)
+F12 / Alt+Space   start menu (categories open to the right; type to search)
 Alt+Tab / Alt+N   next window      Alt+P  previous
 Alt+1..9          focus window N
 Alt+Q             close window     Alt+H  minimize

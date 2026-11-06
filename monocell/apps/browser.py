@@ -13,6 +13,11 @@ from ..widgets import MenuItem, TextField, button, sb_draw, sb_geom
 
 HOME_URL = 'about:home'
 
+WLAN_LOGINS = (
+    ('WIFI@DB (Bahn, Nahverkehr & Bahnhof)', 'http://wifi.bahn.de/'),
+    ('WIFIonICE (ICE/IC Login)', 'http://login.wifionice.de/'),
+)
+
 
 class Line:
     __slots__ = ('cells', 'hits')
@@ -304,8 +309,9 @@ class Browser(App):
     size = (100, 32)
     min_size = (40, 10)
 
-    def __init__(self, wm, win, url=None, **kw):
+    def __init__(self, wm, win, url=None, gfx=False, **kw):
         super().__init__(wm, win)
+        self.want_gfx = bool(gfx)
         self.cfg = wm.cfg
         self.addr = TextField(placeholder='Search or enter address', on_enter=self.go_text)
         self.addr_focus = False
@@ -350,8 +356,9 @@ class Browser(App):
     def proc_info(self):
         return 'graphics mode (Chromium)' if self.gfx else 'text view (lite engine)'
 
-    def reopen(self, url=None, **kw):
+    def reopen(self, url=None, gfx=False, **kw):
         if url:
+            self.want_gfx = bool(gfx)
             self.navigate(url)
 
     # ------------------------------------------------------------ navigation
@@ -420,6 +427,9 @@ class Browser(App):
         self.focus_idx = -1
         self.layout_key = None
         self.notice = ''
+        if self.want_gfx:
+            self.want_gfx = False
+            self.enter_gfx()
         if doc.get('needs_js'):
             if web.Chromium.find(self.cfg.get('chromium', '')):
                 self.notice = 'This page is mostly JavaScript - Ctrl+G shows it in graphics mode.'
@@ -453,7 +463,12 @@ class Browser(App):
                                          'Pages are shown as text; '},
                                    {'x': 'Ctrl+G', 'b': 1},
                                    {'x': ' shows the real page (Chromium, JavaScript) in graphics mode.'}]},
-                  {'t': 'h', 'l': 2, 's': [{'x': 'Bookmarks'}]}]
+                  {'t': 'h', 'l': 2, 's': [{'x': 'WLAN login pages'}]}]
+        for name, url in WLAN_LOGINS:
+            blocks.append({'t': 'li', 'd': 1, 's': [{'x': name, 'h': url}, {'x': '  ' + url, 'c': 0}]})
+        blocks.append({'t': 'p', 's': [{'x': 'Bahn: if the login page does not open by itself, open '
+                                               'one of these links, then Ctrl+G for the real page.'}]})
+        blocks.append({'t': 'h', 'l': 2, 's': [{'x': 'Bookmarks'}]})
         for name, url in bm:
             blocks.append({'t': 'li', 'd': 1, 's': [{'x': name, 'h': url}, {'x': '  ' + url, 'c': 0}]})
         blocks.append({'t': 'h', 'l': 2, 's': [{'x': 'Keys'}]})
@@ -662,6 +677,9 @@ class Browser(App):
                  None]
         for name, url in self.cfg.get('bookmarks', [])[:12]:
             items.append(MenuItem(fit(name, 30).strip(), (lambda u=url: self.navigate(u))))
+        items += [None]
+        for name, url in WLAN_LOGINS:
+            items.append(MenuItem('WLAN: ' + name, (lambda u=url: self.navigate(u))))
         items += [None,
                   MenuItem('Graphics mode (Chromium, JS)', self.enter_gfx, 'Ctrl+G'),
                   MenuItem('Reader mode', self.toggle_reader, checked=self.reader),
