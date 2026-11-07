@@ -56,9 +56,29 @@ class TestFiglet(unittest.TestCase):
 
     def test_available_and_fallback(self):
         names = figlet.available()
-        for n in ('graceful', 'big', 'standard', 'small', 'slant'):
+        for n in ('graceful', 'big', 'standard', 'small', 'slant', 'block', 'block3d'):
             self.assertIn(n, names)
+        self.assertNotIn('3d-ascii', names)
+        self.assertEqual(figlet.load('3d-ascii').name, 'block3d')     # old settings
         self.assertEqual(figlet.load('does-not-exist').name, 'graceful')
+
+    def test_block3d_font(self):
+        f = figlet.load('block3d')
+        self.assertEqual((f.height, f.baseline), (7, 6))
+        rows, spans = f.compose('3D')
+        self.assertEqual(len(spans), 2)
+        self.assertEqual(set(''.join(rows)), {'#', ':', ' '})
+        self.assertEqual(rows[0].strip(), '')          # room for the umlaut dots
+        self.assertTrue(rows[1].startswith('####'))    # face
+        self.assertIn(':', rows[-1])                   # extrusion in the shadow row
+        flat = figlet.load('block')
+        self.assertEqual(flat.height, 7)
+        self.assertNotIn(':', ''.join(flat.compose('DG')[0]))
+
+    def test_block_fonts_carry_umlauts(self):
+        f = figlet.load('block3d')
+        for ch in 'ÄÖÜäöüß€':
+            self.assertIn(ord(ch), f.glyphs)
 
 
 class TestRoundTrip(unittest.TestCase):
@@ -273,3 +293,142 @@ class TestPagesAndInk(unittest.TestCase):
             rows = [''.join(c) for c, _ in lay.rows]
             self.assertEqual(rows[0][:10].strip(), '')   # black: nothing prints
             self.assertTrue(rows[6].startswith('text'))
+
+
+class TestDocumentSettings(unittest.TestCase):
+    def test_settings_line_round_trip(self):
+        src = ('<!-- writer: font3=block paper=a4 cpi=12 left=4 footer="|Seite {page}|" -->\n'
+               '# Titel\n\nText\n')
+        doc = richdoc.parse(src)
+        self.assertEqual(doc.settings['font3'], 'block')
+        self.assertEqual(doc.settings['cpi'], '12')
+        self.assertEqual(doc.settings['footer'], '|Seite {page}|')
+        out = richdoc.serialize(doc)
+        self.assertTrue(out.startswith('<!-- writer:'))
+        self.assertEqual(richdoc.parse(out).settings, doc.settings)
+
+    def test_a_document_without_settings_stays_without(self):
+        doc = richdoc.parse('# T\n\nText\n')
+        self.assertEqual(doc.settings, {})
+        self.assertFalse(richdoc.serialize(doc).startswith('<!--'))
+
+    def test_old_alias_maps_to_the_new_font(self):
+        self.assertEqual(figlet.canonical('3d-ascii'), 'block3d')
+        self.assertEqual(figlet.label('block3d'), 'Block 3D')
+
+    def test_page_geometry_follows_paper_and_pitch(self):
+        a4 = richdoc.Page({'paper': 'a4', 'cpi': '10', 'lpi': '6'})
+        self.assertEqual((a4.cols, a4.lines), (80, 70))
+        el = richdoc.Page({'paper': 'a4', 'cpi': '12', 'lpi': '8'})
+        self.assertEqual((el.cols, el.lines), (96, 93))
+        wide = richdoc.Page({'paper': 'fanfold12', 'cpi': '10'})
+        self.assertEqual(wide.cols, 80)          # the printer's line is 8 inch
+        self.assertEqual(wide.lines, 72)
+
+    def test_margins_are_automatic_or_given(self):
+        auto = richdoc.Page({'paper': 'a4'})
+        self.assertEqual(auto.text_w, 68)
+        given = richdoc.Page({'paper': 'a4', 'left': '2', 'right': '2', 'top': '1'})
+        self.assertEqual(given.text_w, 76)
+        self.assertEqual(given.top, 1)
+        self.assertEqual(given.rows, 70 - 1 - 3)
+
+    def test_header_footer_fields(self):
+        p = richdoc.Page({'footer': 'links|{title}|Seite {page} von {pages}'})
+        line = p.margin_line('footer', 2, 5, 'Brief', '')
+        self.assertTrue(line.startswith('links'))
+        self.assertIn('Brief', line)
+        self.assertTrue(line.endswith('Seite 2 von 5'))
+        self.assertEqual(len(line), p.text_w - (p.text_w - len(line.rstrip())))
+
+    def test_settings_reach_the_layout(self):
+        text = '<!-- writer: font3=standard -->\n# AB\n'
+        _d, _l, rows = lay_out(text, 40)
+        std = figlet.load('standard').height
+        self.assertEqual(len([r for r in rows if not r.strip()]), len(rows) - std)
+
+
+class TestAlignmentAndTables(unittest.TestCase):
+    def test_center_and_right(self):
+        _d, lay, rows = lay_out('Mitte {.center}\n\nRechts {.right}', 40)
+        self.assertEqual(rows[0].rstrip(), ' ' * ((40 - 5) // 2) + 'Mitte')
+        self.assertTrue(rows[2].rstrip().endswith('Rechts'))
+        self.assertEqual(rows[2].rindex('R'), 40 - 6)
+
+    def test_justify_uses_the_line(self):
+        text = ('Dies ist ein langer Absatz, der ueber mehrere Zeilen laeuft, damit man '
+                'die Verteilung der Leerzeichen am Zeilenende sieht. {.justify}')
+        _d, _l, rows = lay_out(text, 40)
+        self.assertEqual(len(rows[1].rstrip()), 40)          # the line is full ...
+        self.assertIn('  ', rows[1][:25])                    # ... because it is spread
+        self.assertEqual(len(rows[3].rstrip()), 6)           # last line is not
+
+    def test_alignment_survives_save_and_load(self):
+        d = richdoc.parse('# T {.center}\n\nx {.right}\n\ny {.justify}\n')
+        out = richdoc.serialize(d)
+        self.assertIn('{.center}', out)
+        self.assertIn('{.right}', out)
+        again = richdoc.parse(out)
+        self.assertEqual([p.align for p in again.paras if p.align], ['center', 'right', 'justify'])
+
+    def test_a_literal_brace_is_not_alignment(self):
+        p = richdoc.parse_line('Text {.center}')
+        self.assertEqual(p.align, 'center')
+        q = richdoc.parse_line('Text \\{.center}')
+        self.assertEqual(q.align, '')
+        self.assertEqual(q.text, 'Text {.center}')
+
+    def test_table_columns_and_alignment(self):
+        text = '| Name | Preis |\n|---:|---:|\n| Brot | 2,50 |\n'
+        _d, _l, rows = lay_out(text, 40)
+        self.assertTrue(rows[0].startswith('+'))
+        self.assertIn('| Name', rows[1])
+        self.assertTrue(rows[2].startswith('+='))
+        self.assertIn('Brot', rows[3])
+        self.assertIn('2,50', rows[3])
+        self.assertTrue(rows[4].startswith('+'))
+
+    def test_table_round_trip(self):
+        src = '| A | B |\n|---|---|\n| 1 | 2 |\n'
+        out = richdoc.serialize(richdoc.parse(src))
+        self.assertEqual(out.rstrip('\n'), src.rstrip('\n'))
+
+    def test_page_break_pads_to_the_next_sheet(self):
+        rows = richdoc.Page().rows
+        _d, lay, out = lay_out('oben\n<pagebreak>\nunten', 40, page=rows)
+        self.assertIn(' page break ', out[1])
+        gy = [i for i, r in enumerate(out) if r.startswith('unten')][0]
+        self.assertEqual(gy % rows, 0)
+        self.assertIn(1, lay.noprint)          # the marker itself does not print
+
+    def test_sheets_carry_margins_header_and_footer(self):
+        from monocell.printer import Sheet
+        pg = richdoc.Page({'paper': 'a4', 'footer': '|Seite {page} von {pages}|'})
+        doc = richdoc.parse('Hallo\n\n<pagebreak>\n\nWelt\n')
+        lay = richdoc.Layout(FakeWM(), pg.text_w, sync=True, mono=True, page=pg.rows).run(doc)
+        sheets = richdoc.sheets(lay, pg, 'Titel', '07.11.2026')
+        self.assertEqual(len(sheets), 2)
+        self.assertIsInstance(sheets[0], Sheet)
+        self.assertTrue(sheets[0].rows[pg.top][0].startswith(' ' * pg.left + 'Hallo'))
+        self.assertIn('Seite 1 von 2', sheets[0].rows[pg.lines - pg.bottom + 1][0])
+        self.assertTrue(any('Welt' in row[0] for row in sheets[1].rows))
+        self.assertEqual(len(sheets[0].rows), pg.lines)
+
+    def test_picture_printed_as_graphics_is_masked(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as d:
+            Image.new('RGB', (30, 20), (200, 200, 200)).save(os.path.join(d, 'p.png'))
+            pg = richdoc.Page({'paper': 'a4'})
+            doc = richdoc.parse('Text\n![p](p.png){x=2 w=10 wrap=square}\n')
+            lay = richdoc.Layout(FakeWM(), pg.text_w, d, sync=True, mono=True,
+                                 page=pg.rows).run(doc)
+            sheets = richdoc.sheets(lay, pg)
+            self.assertEqual(len(sheets[0].gfx), 1)
+            x, y, w, h, img = sheets[0].gfx[0]
+            self.assertEqual(x, pg.left + 2)
+            self.assertTrue(sheets[0].masked(y))
+        with tempfile.TemporaryDirectory() as d:
+            Image.new('RGB', (30, 20), (200, 200, 200)).save(os.path.join(d, 'p.png'))
+            doc = richdoc.parse('![p](p.png){x=2 w=10 print=text}\n')
+            lay = richdoc.Layout(FakeWM(), 60, d, sync=True, mono=True).run(doc)
+            self.assertEqual(richdoc.sheets(lay, richdoc.Page())[0].gfx, [])

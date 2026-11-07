@@ -17,10 +17,19 @@ The layout puts everything on the cell grid as it will look:
 
 Every character gets a box (x0, x1, y, h), so the editor can put the cursor,
 the selection and mouse clicks straight onto the rendered page.
+
+Document settings (fonts of the large sizes, paper, pitch, header/footer) live
+in an HTML comment on the first line, invisible in other Markdown viewers:
+
+    <!-- writer: font3=block3d paper=a4 cpi=10 footer="|Seite {page}|" -->
+
+Paragraph extras: a trailing {.center} / {.right} / {.justify} aligns it, a line
+<pagebreak> starts a new sheet, lines starting with '|' form a table.
 """
 import itertools
 import os
 import re
+import shlex
 from collections import namedtuple
 
 from . import figlet, imaging, util
@@ -40,18 +49,159 @@ PLAIN = Style(False, False, False, 0, 1, '')
 _rev = itertools.count(1)
 _uid = itertools.count(1)
 
-FONT_DEFAULTS = {2: 'graceful', 3: 'big'}
+FONT_DEFAULTS = {2: 'graceful', 3: 'block3d'}
 HEAD_SIZE = {1: 3, 2: 2}
 MIN_SEG = 4          # narrower gaps next to a picture stay empty
 MAX_FLOAT_H = 80
+ALIGNS = ('left', 'center', 'right', 'justify')
+ALIGN_RE = re.compile(r'\s*\{\.(left|center|right|justify)\}\s*$')
+PAGEBREAK_RE = re.compile(r'^\s*<pagebreak\s*/?>\s*$', re.I)
+SETTINGS_RE = re.compile(r'^\s*<!--\s*writer:(.*?)-->\s*$')
+TABLE_RE = re.compile(r'^\s*\|')
+TSEP_CELL_RE = re.compile(r'^\s*(:?)-{1,}(:?)\s*$')
+
+# ------------------------------------------------------------ page geometry
+# paper: (width, height) in inches, label. The X24E prints an 8 inch line.
+PAPERS = {
+    'a4': (8.27, 11.69, 'A4'),
+    'letter': (8.5, 11.0, 'Letter'),
+    'fanfold12': (9.5, 12.0, 'Fanfold 12"'),
+    'fanfold11': (9.5, 11.0, 'Fanfold 11"'),
+}
+PAPER_ORDER = ['a4', 'letter', 'fanfold12', 'fanfold11']
+PRINT_LINE_IN = 8.0
+DOC_DEFAULTS = {
+    'font2': '', 'font3': '',          # '' = the default (cfg / FONT_DEFAULTS)
+    'paper': 'a4', 'cpi': '10', 'lpi': '6',
+    'left': '', 'right': '', 'top': '', 'bottom': '',     # '' = automatic margins
+    'header': '', 'footer': '|Seite {page} von {pages}|',
+}
+
+
+def setting(settings, key, cfg=None):
+    v = (settings or {}).get(key)
+    if v is None or v == '':
+        if key in ('font2', 'font3') and cfg is not None:
+            v = cfg.get('writer_' + key) or ''
+        if not v:
+            v = DOC_DEFAULTS.get(key, '')
+    if key in ('font2', 'font3'):
+        v = figlet.canonical(v or FONT_DEFAULTS[int(key[-1])])
+    return v
+
+
+class Page:
+    """Sheet geometry of a document in characters and lines."""
+
+    def __init__(self, settings=None):
+        s = settings or {}
+        self.paper = s.get('paper') if s.get('paper') in PAPERS else 'a4'
+        self.cpi = 12 if str(s.get('cpi')) == '12' else 10
+        self.lpi = 8 if str(s.get('lpi')) == '8' else 6
+        pw, ph, self.paper_label = PAPERS[self.paper]
+        self.cols = int(round(min(PRINT_LINE_IN, pw) * self.cpi))
+        self.lines = int(ph * self.lpi + 0.01)
+
+        def num(key, auto, lo, hi):
+            try:
+                v = int(s.get(key))
+            except (TypeError, ValueError):
+                v = auto
+            return max(lo, min(hi, v))
+        auto_lr = int(round(0.6 * self.cpi))
+        auto_tb = 3 if self.lpi == 6 else 4
+        self.left = num('left', auto_lr, 0, self.cols // 3)
+        self.right = num('right', auto_lr, 0, self.cols // 3)
+        self.top = num('top', auto_tb, 0, self.lines // 4)
+        self.bottom = num('bottom', auto_tb, 0, self.lines // 4)
+        self.text_w = max(12, self.cols - self.left - self.right)
+        self.rows = max(4, self.lines - self.top - self.bottom)
+        self.header = s.get('header', DOC_DEFAULTS['header'])
+        self.footer = s.get('footer', DOC_DEFAULTS['footer'])
+
+    @property
+    def key(self):
+        return (self.paper, self.cpi, self.lpi, self.left, self.right, self.top, self.bottom,
+                self.header, self.footer)
+
+    def describe(self):
+        return '%s  %d cpi  %d lpi  %dx%d' % (self.paper_label, self.cpi, self.lpi,
+                                             self.cols, self.lines)
+
+    def margin_line(self, which, page, pages, title='', date=''):
+        """Header/footer text for one sheet: 'left|centre|right' with fields."""
+        tpl = self.header if which == 'header' else self.footer
+        if not tpl:
+            return ''
+        parts = tpl.split('|')
+        if len(parts) == 1:
+            parts = [parts[0], '', '']
+        while len(parts) < 3:
+            parts.append('')
+        fields = {'page': str(page), 'pages': str(pages), 'title': title, 'date': date}
+
+        def fill(t):
+            return re.sub(r'\{(page|pages|title|date)\}', lambda m: fields[m.group(1)], t)
+        left, mid, right = (fill(p) for p in parts[:3])
+        w = self.text_w
+        line = [' '] * w
+        for k, c in enumerate(left[:w]):
+            line[k] = c
+        if mid:
+            x = max(0, (w - len(mid)) // 2)
+            for k, c in enumerate(mid[:w - x]):
+                line[x + k] = c
+        if right:
+            x = max(0, w - len(right))
+            for k, c in enumerate(right[:w - x]):
+                line[x + k] = c
+        return ''.join(line).rstrip()
+
+
+def parse_settings(line):
+    m = SETTINGS_RE.match(line)
+    if not m:
+        return None
+    out = {}
+    try:
+        toks = shlex.split(m.group(1))
+    except ValueError:
+        toks = m.group(1).split()
+    for tok in toks:
+        if '=' in tok:
+            k, v = tok.split('=', 1)
+            out[k.strip().lower()] = v
+    return out
+
+
+def settings_line(settings):
+    parts = []
+    for k in ('font2', 'font3', 'paper', 'cpi', 'lpi', 'left', 'right', 'top', 'bottom',
+              'header', 'footer'):
+        if k not in settings:
+            continue
+        v = str(settings[k])
+        if k not in ('header', 'footer') and v == '':
+            continue
+        if re.fullmatch(r'[\w.\-]+', v):
+            parts.append('%s=%s' % (k, v))
+        else:
+            parts.append('%s="%s"' % (k, v.replace('\\', '\\\\').replace('"', '\\"')))
+    for k in sorted(settings):                # keys of newer versions survive
+        if k not in DOC_DEFAULTS:
+            parts.append('%s=%s' % (k, shlex.quote(str(settings[k]))))
+    return '<!-- writer: %s -->' % ' '.join(parts)
 
 
 # ====================================================================== model
 class Para:
-    """One line of the source: kind p | h | li | quote | code | rule."""
-    __slots__ = ('uid', 'rev', 'kind', 'level', 'indent', 'marker', 'lang', 'text', 'st')
+    """One line of the source: kind p | h | li | quote | code | rule | pagebreak |
+    table (cells separated by '|') | tsep (table header rule; marker = aligns)."""
+    __slots__ = ('uid', 'rev', 'kind', 'level', 'indent', 'marker', 'lang', 'text', 'st',
+                 'align')
 
-    def __init__(self, kind='p', text='', st=None, level=0, indent=0, marker='-', lang=''):
+    def __init__(self, kind='p', text='', st=None, level=0, indent=0, marker='-', lang='',
+                 align=''):
         self.uid = next(_uid)
         self.rev = next(_rev)
         self.kind = kind
@@ -61,6 +211,7 @@ class Para:
         self.lang = lang
         self.text = text
         self.st = list(st) if st is not None else [PLAIN] * len(text)
+        self.align = align
 
     def touch(self):
         self.rev = next(_rev)
@@ -79,19 +230,23 @@ class Para:
 
     def same(self, o):
         return (self.kind, self.level, self.indent if self.kind == 'li' else 0,
-                self.marker if self.kind == 'li' else '', self.text, self.st) == \
+                self.marker if self.kind in ('li', 'tsep') else '', self.text, self.st,
+                self.align or '') == \
                (o.kind, o.level, o.indent if o.kind == 'li' else 0,
-                o.marker if o.kind == 'li' else '', o.text, o.st)
+                o.marker if o.kind in ('li', 'tsep') else '', o.text, o.st, o.align or '')
 
     def __repr__(self):
         return 'Para(%s%s %r)' % (self.kind, self.level or '', self.text)
 
 
 class Float:
-    """A picture anchored to a paragraph. x/w None = legacy: centred, fitted."""
-    __slots__ = ('uid', 'path', 'alt', 'anchor', 'x', 'dy', 'w', 'wrap')
+    """A picture anchored to a paragraph. x/w None = legacy: centred, fitted.
 
-    def __init__(self, path, alt='', anchor=None, x=None, dy=0, w=None, wrap='block'):
+    out: how the printer puts it on paper - 'gfx' as a dithered bit image (the
+    24-pin graphics of the Proprinter), 'text' as the characters on the page."""
+    __slots__ = ('uid', 'path', 'alt', 'anchor', 'x', 'dy', 'w', 'wrap', 'out')
+
+    def __init__(self, path, alt='', anchor=None, x=None, dy=0, w=None, wrap='block', out='gfx'):
         self.uid = next(_uid)
         self.path = path
         self.alt = alt
@@ -100,6 +255,7 @@ class Float:
         self.dy = dy
         self.w = w
         self.wrap = wrap
+        self.out = out
 
     def copy(self, anchor):
         f = Float.__new__(Float)
@@ -110,16 +266,20 @@ class Float:
 
 
 class Doc:
-    def __init__(self, paras=None, floats=None):
+    def __init__(self, paras=None, floats=None, settings=None):
         self.paras = paras or [Para()]
         self.floats = floats or []
+        self.settings = dict(settings or {})
 
     def copy(self):
         paras = [p.copy() for p in self.paras]
         by = {o.uid: n for o, n in zip(self.paras, paras)}
         floats = [f.copy(by.get(f.anchor.uid, paras[0]) if f.anchor else paras[0])
                   for f in self.floats]
-        return Doc(paras, floats)
+        return Doc(paras, floats, self.settings)
+
+    def page(self):
+        return Page(self.settings)
 
     def index(self, para):
         for i, p in enumerate(self.paras):
@@ -142,23 +302,76 @@ def spans_to_chars(spans):
     return ''.join(text), st
 
 
+def split_cells(line):
+    """'| a | b\\|c |' -> ['a', 'b\\|c'] (escaped pipes stay inside a cell)."""
+    s = line.strip()
+    if s.startswith('|'):
+        s = s[1:]
+    if s.endswith('|') and not s.endswith('\\|'):
+        s = s[:-1]
+    cells, cur, i = [], [], 0
+    while i < len(s):
+        if s[i] == '\\' and i + 1 < len(s):
+            cur.append(s[i:i + 2])
+            i += 2
+            continue
+        if s[i] == '|':
+            cells.append(''.join(cur).strip())
+            cur = []
+        else:
+            cur.append(s[i])
+        i += 1
+    cells.append(''.join(cur).strip())
+    return cells
+
+
+def parse_table_line(line):
+    cells = split_cells(line)
+    if cells and all(TSEP_CELL_RE.match(c) for c in cells):
+        aligns = ''
+        for c in cells:
+            m = TSEP_CELL_RE.match(c)
+            aligns += 'c' if m.group(1) and m.group(2) else ('r' if m.group(2) else 'l')
+        return Para('tsep', marker=aligns)
+    text, st = [], []
+    for n, c in enumerate(cells):
+        if n:
+            text.append('|')
+            st.append(PLAIN)
+        t, s = spans_to_chars(parse_inline(c.replace('\\|', '\u2502')))
+        t = t.replace('\u2502', '/')            # a pipe inside a cell cannot survive
+        text.append(t)
+        st.extend(s)
+    return Para('table', ''.join(text), st)
+
+
 def parse_line(line):
+    align = ''
+    m = ALIGN_RE.search(line)
+    if m and not line[:m.start()].endswith('\\') and not TABLE_RE.match(line):
+        align = '' if m.group(1) == 'left' else m.group(1)
+        line = line[:m.start()]
+    if PAGEBREAK_RE.match(line):
+        return Para('pagebreak')
     m = HEAD_RE.match(line)
     if m:
         t, st = spans_to_chars(parse_inline(m.group(2)))
-        return Para('h', t, st, level=len(m.group(1)))
+        return Para('h', t, st, level=len(m.group(1)), align=align)
     if RULE_RE.match(line):
         return Para('rule')
+    if TABLE_RE.match(line):
+        return parse_table_line(line)
     m = LIST_RE.match(line)
     if m:
         t, st = spans_to_chars(parse_inline(m.group(3)))
-        return Para('li', t, st, indent=len(m.group(1).expandtabs(4)), marker=m.group(2))
+        return Para('li', t, st, indent=len(m.group(1).expandtabs(4)), marker=m.group(2),
+                    align=align)
     m = QUOTE_RE.match(line)
     if m:
         t, st = spans_to_chars(parse_inline(m.group(1)))
-        return Para('quote', t, st)
+        return Para('quote', t, st, align=align)
     t, st = spans_to_chars(parse_inline(line))
-    return Para('p', t, st)
+    return Para('p', t, st, align=align)
 
 
 def _attrs(s):
@@ -181,6 +394,9 @@ def parse(text):
     lines = text.replace('\r\n', '\n').split('\n')
     paras, floats, pending = [], [], []
     i = 0
+    settings = parse_settings(lines[0]) if lines else None
+    if settings is not None:
+        i = 1
     while i < len(lines):
         line = lines[i]
         if line.strip().startswith('```'):
@@ -204,7 +420,8 @@ def parse(text):
             w = _int(a.get('w'))
             f = Float(m.group(2).strip(), m.group(1), None,
                       x=_int(a.get('x')), dy=max(0, _int(a.get('dy'), 0)), w=w,
-                      wrap=a.get('wrap', 'square' if w else 'block'))
+                      wrap=a.get('wrap', 'square' if w else 'block'),
+                      out='text' if a.get('print') == 'text' else 'gfx')
             if f.wrap not in ('square', 'block'):
                 f.wrap = 'square'
             floats.append(f)
@@ -221,11 +438,11 @@ def parse(text):
         paras.append(Para())
         for f in pending:
             f.anchor = paras[-1]
-    return Doc(paras, floats)
+    return Doc(paras, floats, settings)
 
 
 # ================================================================== serialize
-TEXT_ESC = '\\`*_[<'
+TEXT_ESC = '\\`*_[<{'
 
 
 def _esc(t, level):
@@ -309,7 +526,8 @@ def _guard_start(line):
         return line
     if (HEAD_RE.match(line) or LIST_RE.match(line) or QUOTE_RE.match(line)
             or RULE_RE.match(line) or IMAGE_RE.match(line) or line.lstrip().startswith('```')
-            or re.match(r'^\s*#', line)):
+            or re.match(r'^\s*#', line) or TABLE_RE.match(line) or PAGEBREAK_RE.match(line)
+            or SETTINGS_RE.match(line)):
         n = len(line) - len(line.lstrip())
         m = re.match(r'\s*\d+([.)])', line)
         if m:                                   # 1. -> 1\.  (digits cannot be escaped)
@@ -318,17 +536,37 @@ def _guard_start(line):
     return line
 
 
+def table_md(p, level=0):
+    if p.kind == 'tsep':
+        cells = []
+        for a in p.marker or 'l':
+            cells.append({'c': ':---:', 'r': '---:'}.get(a, '---'))
+        return '|' + '|'.join(cells) + '|'
+    cells, k = [], 0
+    for part in p.text.split('|'):
+        cells.append(inline_md(part, p.st[k:k + len(part)], level).replace('|', '\\|'))
+        k += len(part) + 1
+    return '| ' + ' | '.join(cells) + ' |'
+
+
 def para_md(p, level=0):
-    body = inline_md(p.text, p.st, level)
-    if p.kind == 'h':
-        return '#' * max(1, min(6, p.level)) + ' ' + body
-    if p.kind == 'li':
-        return ' ' * p.indent + p.marker + ' ' + body
-    if p.kind == 'quote':
-        return '> ' + body
+    if p.kind in ('table', 'tsep'):
+        return table_md(p, level)
+    if p.kind == 'pagebreak':
+        return '<pagebreak>'
     if p.kind == 'rule':
         return '---'
-    return _guard_start(body)
+    body = inline_md(p.text, p.st, level)
+    suffix = ' {.%s}' % p.align if p.align in ALIGNS and p.align != 'left' else ''
+    if p.kind == 'h':
+        return '#' * max(1, min(6, p.level)) + ' ' + body + suffix
+    if p.kind == 'li':
+        return ' ' * p.indent + p.marker + ' ' + body + suffix
+    if p.kind == 'quote':
+        return '> ' + body + suffix
+    if suffix and not body:
+        body = ' '
+    return _guard_start(body) + suffix
 
 
 def para_line(p):
@@ -342,7 +580,7 @@ def para_line(p):
 
 def float_md(f):
     alt = (f.alt or '').replace(']', '').replace('\n', ' ')
-    if f.w is None and f.x is None and f.wrap == 'block' and not f.dy:
+    if f.w is None and f.x is None and f.wrap == 'block' and not f.dy and f.out != 'text':
         return '![%s](%s)' % (alt, f.path)
     attrs = []
     if f.x is not None:
@@ -352,6 +590,8 @@ def float_md(f):
     if f.w is not None:
         attrs.append('w=%d' % f.w)
     attrs.append('wrap=%s' % f.wrap)
+    if f.out == 'text':
+        attrs.append('print=text')
     return '![%s](%s){%s}' % (alt, f.path, ' '.join(attrs))
 
 
@@ -361,6 +601,8 @@ def serialize(doc):
     for f in doc.floats:
         byanchor.setdefault(id(f.anchor), []).append(f)
     in_code = False
+    if doc.settings:
+        out.append(settings_line(doc.settings))
     for p in doc.paras:
         if in_code and p.kind != 'code':
             out.append('```')
@@ -395,6 +637,12 @@ def export_text(doc):
             out.append(p.text)
         elif p.kind == 'rule':
             out.append('-' * 40)
+        elif p.kind == 'pagebreak':
+            out.append('\f')
+        elif p.kind == 'tsep':
+            out.append('-' * 40)
+        elif p.kind == 'table':
+            out.append(' | '.join(c.strip() for c in p.text.split('|')))
         elif p.kind == 'li':
             out.append(' ' * min(p.indent, 12) + '- ' + p.text)
         elif p.kind == 'quote':
@@ -530,7 +778,7 @@ class Layout:
     _cache = {}
 
     def __init__(self, wm, width, base_dir='', images=None, image_mode=None, vt=None,
-                 sync=False, mono=False, page=None, bg_role='win'):
+                 sync=False, mono=False, page=None, bg_role='win', settings=None):
         self.wm = wm
         self.th = wm.theme
         self.width = max(8, width)
@@ -546,8 +794,7 @@ class Layout:
         self.sync = sync
         self.bg = self.ink(0)
         cfg = wm.cfg
-        self.font_names = {2: cfg.get('writer_font2') or FONT_DEFAULTS[2],
-                           3: cfg.get('writer_font3') or FONT_DEFAULTS[3]}
+        self.font_names = {2: setting(settings, 'font2', cfg), 3: setting(settings, 'font3', cfg)}
         self.fonts = {k: figlet.load(v) for k, v in self.font_names.items()}
         self._attr = {}
         self.key = (self.width, tuple(sorted(self.font_names.items())), self.vt,
@@ -795,18 +1042,139 @@ class Layout:
             return 1, 0
         return f.baseline, f.height - f.baseline
 
-    def flow(self, p, excl=(), phase=0):
+    def flow(self, p, excl=(), phase=0, table=None):
         excl = tuple(excl)
-        key = ('flow', p.uid, p.rev, self.key, excl)
+        key = ('flow', p.uid, p.rev, self.key, excl, table, p.align)
         hit = self._cache.get(key)
         if hit is not None:
             return hit
         if p.kind == 'rule':
             res = self._flow_rule(p, excl)
+        elif p.kind == 'pagebreak':
+            res = self._flow_pagebreak(p)
+        elif p.kind in ('table', 'tsep') and table is not None:
+            res = self._flow_table(p, table)
         else:
             res = self._flow_text(p, excl)
         self._remember(key, res)
         return res
+
+    # ------------------------------------------------------------ page break, tables
+    def _flow_pagebreak(self, p):
+        rows = self._blank_rows(1)
+        label = ' page break '
+        W = self.width
+        line = ('-' * W)
+        x = max(0, (W - len(label)) // 2)
+        line = line[:x] + label + line[x + len(label):]
+        attr = self.th.c('dim', self.bg_role if self.mono else 'win')
+        for k, c in enumerate(line[:W]):
+            if c != '-' or k % 2 == 0:
+                rows[0][0][k] = c
+                rows[0][1][k] = attr
+        return ParaLayout(rows, [(0, 0, 0, 1)], [], (0, 0, 1))
+
+    @staticmethod
+    def table_groups(paras):
+        """{index: (widths, aligns, first, last)} for every table/tsep paragraph."""
+        out = {}
+        i, n = 0, len(paras)
+        while i < n:
+            if paras[i].kind not in ('table', 'tsep'):
+                i += 1
+                continue
+            j = i
+            while j < n and paras[j].kind in ('table', 'tsep'):
+                j += 1
+            widths, aligns = [], ''
+            for k in range(i, j):
+                p = paras[k]
+                if p.kind == 'tsep':
+                    if not aligns:
+                        aligns = p.marker or ''
+                    while len(widths) < len(p.marker or ''):
+                        widths.append(1)
+                    continue
+                for c, cell in enumerate(p.text.split('|')):
+                    if c >= len(widths):
+                        widths.append(1)
+                    widths[c] = max(widths[c], len(cell))
+            aligns = (aligns + 'l' * len(widths))[:len(widths)]
+            info = tuple(widths), aligns
+            for k in range(i, j):
+                out[k] = info + (k == i, k == j - 1)
+            i = j
+        return out
+
+    def _table_border(self, widths, ch='-', joint='+'):
+        return joint + joint.join(ch * (w + 2) for w in widths) + joint
+
+    def _flow_table(self, p, table):
+        widths, aligns, first, last = table
+        W = self.width
+        role = None
+        rows = []
+        border = self.attr(PLAIN) if self.mono else self.th.c('dim', 'win')
+        y = 0
+
+        def put_line(text, attr):
+            r = self._blank_rows(1)[0]
+            for k, c in enumerate(text[:W]):
+                r[0][k] = c
+                r[1][k] = attr
+            rows.append(r)
+
+        if first and p.kind != 'tsep':
+            put_line(self._table_border(widths), border)
+            y += 1
+        if p.kind == 'tsep':
+            put_line(self._table_border(widths, '='), border)
+            lines = [(0, 0, y, 1)]
+            if last:
+                put_line(self._table_border(widths), border)
+            return ParaLayout(rows, lines, [], (min(2, W - 1), y, 1))
+        line = [' '] * W
+        ats = [self.bg] * W
+        boxes = [None] * len(p.text)
+        cells = p.text.split('|')
+        x = 0
+        k = 0                                   # char index in p.text
+        for c, w in enumerate(widths):
+            if x < W:
+                line[x], ats[x] = '|', border
+            cell = cells[c] if c < len(cells) else ''
+            a = aligns[c] if c < len(aligns) else 'l'
+            pad = w - len(cell)
+            off = pad // 2 if a == 'c' else (pad if a == 'r' else 0)
+            cx = x + 2 + off
+            if c < len(cells):
+                for j, ch in enumerate(cell):
+                    col = cx + j
+                    if col < W:
+                        line[col] = ch
+                        ats[col] = self.attr(p.st[k + j], role)
+                    boxes[k + j] = (min(col, W - 1), min(col + 1, W), y, 1)
+                k += len(cell)
+                if k < len(p.text):              # the '|' after this cell
+                    sep = x + w + 3
+                    boxes[k] = (min(cx + len(cell), W - 1), min(sep, W), y, 1)
+                    k += 1
+            x += w + 3
+        if x < W:
+            line[x], ats[x] = '|', border
+        rows.append((line, ats))
+        if last:
+            put_line(self._table_border(widths), border)
+        # caret after the last character
+        if p.text:
+            bx = boxes[len(p.text) - 1]
+            end = (min(bx[1], W - 1), y, 1)
+        else:
+            end = (min(2, W - 1), y, 1)
+        for i in range(len(boxes)):
+            if boxes[i] is None:
+                boxes[i] = (end[0], end[0], y, 1)
+        return ParaLayout(rows, [(0, len(p.text), y, 1)], boxes, end)
 
     def _blank_rows(self, n, attr=None):
         attr = self.bg if attr is None else attr
@@ -839,6 +1207,44 @@ class Layout:
         if p.kind == 'quote':
             return '| ', 2, self.th.c('dim', 'win')
         return '', 0, self.bg
+
+    @staticmethod
+    def _align(placed, x1, align, last):
+        """Shift (center/right) or spread (justify) the atoms of one line.
+
+        Returns the new placed list and {index: extra width} for widened spaces."""
+        idx = [n for n, (a, _x, hang) in enumerate(placed) if not hang]
+        while idx and placed[idx[-1]][0].space:
+            idx.pop()
+        if not idx:
+            return placed, {}
+        end = placed[idx[-1]][1] + placed[idx[-1]][0].w
+        free = x1 - end
+        if free <= 0:
+            return placed, {}
+        out = list(placed)
+        widen = {}
+        if align == 'justify':
+            if last:
+                return placed, {}
+            gaps = [n for n in idx if placed[n][0].space and n > idx[0]]
+            if not gaps:
+                return placed, {}
+            per, rest = divmod(free, len(gaps))
+            shift = 0
+            gi = 0
+            for n, (a, ax, hang) in enumerate(placed):
+                out[n] = (a, ax + shift, hang)
+                if gi < len(gaps) and n == gaps[gi]:
+                    add = per + (1 if gi < rest else 0)
+                    widen[n] = add
+                    shift += add
+                    gi += 1
+            return out, widen
+        shift = free // 2 if align == 'center' else free
+        for n, (a, ax, hang) in enumerate(placed):
+            out[n] = (a, min(ax + shift, x1) if hang else ax + shift, hang)
+        return out, widen
 
     def _flow_text(self, p, excl, phase=0):
         W = self.width
@@ -885,6 +1291,10 @@ class Layout:
                 result = self._fill(p, q, ai, segs, pre_w)
             placed, ai2, _b, _d, _u = result
             h = B + D + ul
+            widen = {}
+            if p.align in ('center', 'right', 'justify') and placed and len(segs) == 1 \
+                    and not code:
+                placed, widen = self._align(placed, segs[0][1], p.align, ai2 >= len(q))
             lrows = self._blank_rows(h, field if code else None)
             if code:
                 for r in range(h):
@@ -907,7 +1317,8 @@ class Layout:
                         lrows[r][0][sx] = '|'
                         lrows[r][1][sx] = pre_attr
             a_first = placed[0][0].i0 if placed else (q[ai].i0 if ai < len(q) else len(p.text))
-            for a, ax, hang in placed:
+            for n_at, (a, ax, hang) in enumerate(placed):
+                extra = widen.get(n_at, 0)
                 for xoff, pc in a.pieces:
                     top = B - pc.B
                     px = ax + xoff
@@ -938,7 +1349,7 @@ class Layout:
                         if hang:
                             boxes[k] = (min(ax, W), min(ax, W), y + top, pc.h)
                         else:
-                            boxes[k] = (px + s0, px + s1, y + top, pc.h)
+                            boxes[k] = (px + s0, px + s1 + extra, y + top, pc.h)
                     # underline row
                     if ul and not hang:
                         urow = lrows[B + D]
@@ -953,7 +1364,7 @@ class Layout:
                                         and p.st[k + 1].ul):
                                     continue
                             mark = '-' if lvl == 1 else '='
-                            for col in range(px + s0, min(W, px + s1)):
+                            for col in range(px + s0, min(W, px + s1 + extra)):
                                 urow[0][col] = mark
                                 urow[1][col] = attrs_by_glyph[g]
             b_last = ai2 if ai2 <= len(q) else len(q)
@@ -1098,8 +1509,33 @@ class Layout:
         pls = []
         excl = []
         frects = []
+        noprint = set()
+        tables = self.table_groups(doc.paras)
         y = 0
-        for p in doc.paras:
+        for pi, p in enumerate(doc.paras):
+            if p.kind == 'pagebreak':
+                pl = self.flow(p)
+                tops.append(y)
+                pls.append(pl)
+                rows.extend(pl.rows)
+                noprint.add(y)
+                y += pl.height
+                if self.page and y % self.page:
+                    pad = self.page - y % self.page
+                    rows.extend(self._blank_rows(pad))
+                    y += pad
+                for f in anchored.get(id(p), ()):      # pictures go after the break
+                    x, w, h, path, img, err = self.float_geom(f)
+                    frects.append((f, x, y, w, h, path, img, err))
+                    excl.append((0, self.width, y, y + h + 1))
+                continue
+            if pi in tables:
+                pl = self.paginate(self.flow(p, table=tables[pi]), y)
+                tops.append(y)
+                pls.append(pl)
+                rows.extend(pl.rows)
+                y += pl.height
+                continue
             for f in anchored.get(id(p), ()):
                 x, w, h, path, img, err = self.float_geom(f)
                 fy = y + max(0, f.dy or 0)
@@ -1140,6 +1576,7 @@ class Layout:
         self.paras = pls
         self.floats = [(f, x, fy, w, h) for f, x, fy, w, h, *_ in frects]
         self.height = len(rows)
+        self.noprint = noprint
         return self
 
     # ------------------------------------------------------------ queries
@@ -1215,6 +1652,51 @@ class Layout:
             else:
                 break
         return best
+
+
+def sheets(lay, page, title='', date='', pick=None):
+    """A laid-out document (rows per page = page.rows) -> printer.Sheet list.
+
+    Margins, header and footer are added; page-break markers are dropped;
+    pictures printed as graphics become gfx areas (their cells are masked).
+    pick: iterable of sheet numbers (1-based) to keep, None = all."""
+    from .printer import Sheet
+    rows_pp = page.rows
+    n = max(1, (lay.height + rows_pp - 1) // rows_pp)
+    blank = ' ' * page.cols
+    out = []
+    gfx_by_page = {}
+    for f, x, fy, w, h in lay.floats:
+        if getattr(f, 'out', 'gfx') != 'gfx':
+            continue
+        k, local = divmod(fy, rows_pp)
+        img, _err = lay.images.get(lay.resolve(f.path), True) \
+            if not lay.resolve(f.path).startswith(('http:', 'https:')) else (None, 'url')
+        if img is None:
+            continue                      # missing picture: the placeholder prints as text
+        gfx_by_page.setdefault(k, []).append(
+            (page.left + x, page.top + local, w, min(h, rows_pp - local), img))
+    want = set(pick) if pick else None
+    for k in range(n):
+        if want is not None and k + 1 not in want:
+            continue
+        rows = [(blank, [0] * page.cols) for _ in range(page.lines)]
+        for r in range(rows_pp):
+            gy = k * rows_pp + r
+            if gy >= lay.height or gy in lay.noprint:
+                continue
+            chars, attrs = lay.rows[gy]
+            line = (' ' * page.left + ''.join(chars))[:page.cols].ljust(page.cols)
+            at = [0] * page.left + list(attrs)
+            rows[page.top + r] = (line, (at + [0] * page.cols)[:page.cols])
+        for which, y in (('header', max(0, page.top - 2)),
+                         ('footer', min(page.lines - 1, page.lines - page.bottom + 1))):
+            t = page.margin_line(which, k + 1, n, title, date)
+            if t and (which == 'header' and page.top >= 1 or which == 'footer' and page.bottom >= 1):
+                line = (' ' * page.left + t)[:page.cols].ljust(page.cols)
+                rows[y] = (line, [0] * page.cols)
+        out.append(Sheet(k + 1, rows, gfx_by_page.get(k, [])))
+    return out
 
 
 def render_rows(wm, text, width, base_dir='', image_mode=None, vt=None, images=None):

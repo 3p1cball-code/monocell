@@ -1,6 +1,6 @@
 """Settings: appearance editor (palette + element colours), desktop/media/web/calendar options."""
 from ..app import App
-from .. import figlet, gcal, startup
+from .. import gcal, startup
 from ..theme import (PRESETS, PRESET_FONTS, available_fonts, delete_theme,
                      save_theme, saved_themes)
 from ..util import fit
@@ -12,7 +12,6 @@ SECTIONS = [('colors', 'Appearance'), ('desktop', 'Desktop'), ('background', 'Ba
             ('calendar', 'Calendar'), ('tools', 'Tools'),
             ('about', 'About')]
 
-FIGLET_FONTS = figlet.available() or ['graceful']
 
 OPTIONS = {
     'desktop': [
@@ -76,11 +75,8 @@ OPTIONS = {
         ('opencode_workdir', 'Working directory (empty = home)', 'text'),
         ('kdeconnect_display', 'KDE Connect headless X display', 'text'),
         ('shot_dir', 'Text screenshot folder', 'text'),
-        ('printer_device', 'Printer device or CUPS queue (empty = print to file)', 'text'),
-        ('writer_font2', 'Writer big text (S2, H2)', FIGLET_FONTS),
-        ('writer_font3', 'Writer huge text (S3, H1)', FIGLET_FONTS),
-        ('writer_page_w', 'Writer page width in characters', [64, 72, 80, 88, 96]),
-        ('writer_page_lines', 'Writer page length in lines', [60, 66, 72, 84]),
+        # Writer fonts, paper and printer live in the Writer itself
+        # (Format > Fonts, File > Page setup, File > Print): one place only.
     ],
 }
 
@@ -180,9 +176,21 @@ class Settings(AppearanceMixin, App):
         x, y = self.theme_pos
         self.wm.menu(items, self.win.x + 1 + self.body_x + x, self.win.y + 2 + y, title='Themes')
 
+    def grid_for(self, name):
+        """'170x64' - the console grid this font would give, from the current one."""
+        from ..theme import console_font_cell
+        old = console_font_cell(self.cfg.get('font') or '')
+        new = console_font_cell(name)
+        term = getattr(self.wm, 'term', None)
+        if not (old and new and term):
+            return ''
+        w = term.w * old[0] // new[0]
+        h = term.h * old[1] // new[1]
+        return '  %dx%d' % (w, h)
+
     def font_menu(self):
         cur = self.cfg.get('font', '')
-        items = [MenuItem(label, (lambda n=name: self.load_font(n)),
+        items = [MenuItem(label + self.grid_for(name), (lambda n=name: self.load_font(n)),
                           checked=cur == name)
                  for label, name in available_fonts()]
         items.append(None)

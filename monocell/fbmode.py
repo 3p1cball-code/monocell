@@ -63,6 +63,7 @@ TONE = {'cga': 'eq=gamma=1.25:contrast=1.15',
 # a smaller bayer_scale is a stronger ordered dither: few colours need it to carry shades
 BAYER_SCALE = {'vga': 2, 'theme': 2, 'ega': 1, 'cga': 1}
 SCALE = 4                              # screen pixels per picture pixel: a quarter resolution
+OSD_PX = 2                             # screen pixels per OSD font pixel
 DITHERS = ('bayer', 'none')
 PIX_FMT = {32: 'bgr0', 24: 'bgr24', 16: 'rgb565le'}
 
@@ -906,7 +907,9 @@ class Session:
         key = (want_bar, want_info, int(pos), int(dur), paused, tuple(self.info_lines))
         if key != self.osd_key:
             self.osd_key = key
-            px = max(2, self.scale)
+            # OSD text always in 2x2 blocks: half the size of a low-res video
+            # pixel (which is SCALE wide) and unchanged in the original resolution
+            px = OSD_PX
             runs = []
             if want_bar:
                 runs += self.bottom_bar(px, pos, dur, paused)

@@ -123,11 +123,12 @@ class TestTyping(WriterCase):
         app.on_click('underline2', None)
         self.assertEqual(self.src(app), 'Hallo Welt')
 
-    def test_toolbar_labels_u1_u2_s1_s2_s3(self):
+    def test_menu_bar_and_format_bar(self):
         app = self.make('x')
         app.focus_mode = False
         screen = '\n'.join(self.draw(app, 100, 30))
-        for label in (' U1 ', ' U2 ', ' S1 ', ' S2 ', ' S3 '):
+        for label in (' File ', ' Edit ', ' Format ', ' Insert ', ' View ',
+                      ' B ', ' U ', ' U2 ', ' Normal v ', ' Text '):
             self.assertIn(label, screen)
 
     def test_s1_back_to_normal_size(self):
@@ -369,9 +370,9 @@ class TestExport(WriterCase):
         self.wm.picked(out)
         with open(out) as f:
             text = f.read()
-        self.assertIn('Titel', text)
-        self.assertIn('Text unter fett', text)
-        self.assertIn('[Bild: Alt]', text)
+        self.assertIn('Text unter fett', text)      # the page as printed
+        self.assertIn('-----', text)                  # underline row
+        self.assertIn('Seite 1 von 1', text)          # footer
         self.assertNotIn('**', text)
         self.assertNotIn('<u>', text)
 
@@ -382,10 +383,12 @@ class TestExport(WriterCase):
         with open(p) as f:
             self.assertEqual(f.read(), 'Text fett')
 
-    def test_toolbar_has_txt(self):
+    def test_file_menu_has_exports(self):
         app = self.make('x')
-        app.focus_mode = False
-        self.assertIn(' TXT ', '\n'.join(self.draw(app, 110, 30)))
+        labels = [i.label for i in app.menu_file() if i]
+        self.assertIn('Export text (.txt)', labels)
+        self.assertIn('Export Word (.docx)', labels)
+        self.assertIn('Print...', labels)
 
     def test_docx_export_embeds_the_picture(self):
         import zipfile
@@ -439,12 +442,14 @@ class TestPage(WriterCase):
         finally:
             printer.send = orig
         self.assertTrue(sent)
-        body = sent[0].split(b'\x1b2', 1)[1]      # after the init (ESC A 12/72 holds a \f)
+        body = sent[0].split(b'\x1bI', 1)[1]      # after the init (ESC A 12/72 holds a \f)
         self.assertEqual(body.count(b'\x0c'), app.pages)
-        self.assertIn(b'Seite 2/', sent[0])
+        self.assertIn(b'Seite 2 von', sent[0])
+        self.assertTrue(sent[0].startswith(b'\x1b6'))      # character set 2: umlauts
 
     def test_page_break_pushes_content_down(self):
-        app = self.make('x\n' * 59 + '<u>y</u>')
+        rows = richdoc.Page().rows
+        app = self.make('x\n' * (rows - 1) + '<u>y</u>')
         lay = app.layout()
         first_y = lay.tops[-1] + lay.paras[-1].lines[0][2]
         self.assertEqual(first_y % app.rows_per_page, 0)   # new page starts clean
@@ -510,8 +515,159 @@ class TestSourceAndFiles(WriterCase):
             app.print_doc()
         finally:
             printer.send = orig
-        self.assertTrue(sent and b'-' in sent[0] and sent[0].startswith(b'\x1b@'))
+        self.assertTrue(sent and b'-' in sent[0] and sent[0].startswith(b'\x1b6'))
 
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestNewUi(WriterCase):
+    def test_menu_bar_opens_and_navigates(self):
+        app = self.make('x')
+        app.open_menu(0)
+        self.assertEqual(app.open_menu_index(), None)     # FakeWM has no popups
+        for name in ('menu_file', 'menu_edit', 'menu_format', 'menu_insert', 'menu_view'):
+            items = getattr(app, name)()
+            self.assertTrue(items and any(items))
+
+    def test_format_menu_lists_styles_and_aligns(self):
+        labels = [i.label for i in app_labels(self) if i]
+        self.assertIn('Bold', labels)
+        self.assertIn('Heading 2', labels)
+        self.assertIn('Align center', labels)
+        self.assertIn('Fonts...', labels)
+
+    def test_apply_paragraph_style(self):
+        app = self.make('Titel\n\nText')
+        app.cur = (0, 0)
+        app.set_style(1)                       # Heading 1
+        p = app.doc.paras[0]
+        self.assertEqual((p.kind, p.level), ('h', 1))
+        app.set_style(5)                       # bullet list
+        self.assertEqual(app.doc.paras[0].kind, 'li')
+        app.set_style(0)
+        self.assertEqual(app.doc.paras[0].kind, 'p')
+
+    def test_alignment_from_the_bar_and_the_key(self):
+        app = self.make('Text hier')
+        app.on_click(('align', 'center'), None)
+        self.assertEqual(app.doc.paras[0].align, 'center')
+        app.on_key(key('ctrl+e'))
+        self.assertEqual(app.doc.paras[0].align, 'right')
+        app.on_key(key('ctrl+e'))
+        self.assertEqual(app.doc.paras[0].align, 'justify')
+        app.on_key(key('ctrl+e'))
+        self.assertEqual(app.doc.paras[0].align, '')
+
+    def test_fonts_dialog_writes_into_the_document(self):
+        app = self.make('Text')
+        app.fonts_form()
+        f = app.form
+        self.assertIsNotNone(f)
+        f.row('font3')['value'] = 'small'
+        f.on_button('OK')
+        self.assertEqual(app.doc.settings['font3'], 'small')
+        self.assertIn('font3=small', self.src(app))
+        text = self.draw(app, 90, 30)
+        app2 = self.make(self.src(app))
+        self.assertEqual(app2.doc.settings['font3'], 'small')
+
+    def test_page_setup_changes_the_sheet(self):
+        app = self.make('Text')
+        app.page_form()
+        f = app.form
+        f.row('cpi')['value'] = '12'
+        f.row('paper')['value'] = 'fanfold12'
+        f.on_button('OK')
+        self.assertEqual(app.pg.cpi, 12)
+        self.assertEqual(app.pg.paper, 'fanfold12')
+
+    def test_insert_table_and_type_in_cells(self):
+        app = self.make('')
+        app.insert_table('2x3')
+        kinds = [p.kind for p in app.doc.paras]
+        self.assertEqual(kinds[:3], ['table', 'tsep', 'table'])
+        self.assertEqual(app.doc.paras[3].text, '|')
+        self.type(app, 'Kosten')               # the first cell is selected: replaced
+        self.assertEqual(app.doc.paras[0].text, 'Kosten|Spalte 2')
+        app.on_key(key('tab'))                 # into the second cell (selected)
+        self.type(app, 'Euro')
+        self.assertEqual(app.doc.paras[0].text, 'Kosten|Euro')
+        app.on_key(key('tab'))                 # last cell: new row
+        self.assertEqual(app.doc.paras[1].kind, 'tsep')
+        self.assertEqual(app.cur, (2, 0))
+
+    def test_page_break_insert(self):
+        app = self.make('oben\n\nunten')
+        app.cur = (0, 0)
+        app.insert_block('pagebreak')
+        self.assertEqual(app.doc.paras[0].kind, 'pagebreak')
+        self.assertEqual(app.doc.paras[1].text, 'oben')
+
+    def test_enter_on_an_empty_table_row_leaves_the_table(self):
+        app = self.make('| a | b |\n|---|---|\n|   |   |')
+        app.cur = (2, 0)
+        app.enter()
+        self.assertEqual(app.doc.paras[2].kind, 'p')
+
+    def test_find_and_replace(self):
+        app = self.make('Der Hund und der Hund.')
+        app.on_key(key('ctrl+f'))
+        app.find['q'].set('Hund')
+        app.on_key(key('enter'))
+        self.assertEqual(app.selection_text(), 'Hund')
+        app.find['r'].set('Kater')
+        app.replace_all()
+        self.assertEqual(app.doc.paras[0].text, 'Der Kater und der Kater.')
+        self.assertEqual(app.find['note'], '2 replaced')
+
+    def test_find_reports_when_nothing_matches(self):
+        app = self.make('Text')
+        app.on_key(key('ctrl+f'))
+        app.find['q'].set('zebra')
+        self.assertFalse(app.find_next())
+        self.assertEqual(app.find['note'], 'not found')
+
+    def test_templates(self):
+        app = self.make('')
+        app.new_from_template('letter', replace=True)
+        text = self.src(app)
+        self.assertIn('Sehr geehrte Damen und Herren', text)
+        self.assertIn('{.right}', text)
+        # the letter has no footer
+        self.assertEqual(app.doc.settings.get('footer'), '')
+
+    def test_print_dialog_to_file(self):
+        app = self.make('# Hi\n\nText')
+        app.print_form()
+        f = app.form
+        f.row('quality')['value'] = 'letter'
+        f.on_button('Print')
+        import monocell.printer as printer
+        out = os.path.join(tempfile.mkdtemp(), 'x.prn')
+        self.wm.picked(out)
+        with open(out, 'rb') as fh:
+            data = fh.read()
+        self.assertTrue(data.startswith(b'\x1b6'))
+        self.assertIn(b'\x1bI\x02', data)          # letter quality
+
+    def test_print_page_range(self):
+        app = self.make('\n'.join('Zeile %d' % i for i in range(400)))
+        self.assertEqual(len(app.make_sheets()[1]), 7)
+        two = app.make_sheets(pick=[2, 4])[1]
+        self.assertEqual([s.number for s in two], [2, 4])
+
+
+def app_labels(case):
+    app = case.make('x')
+    return app.menu_format()
+
+
+class TestGraphicsPreview(WriterCase):
+    def test_preview_needs_graphics_mode(self):
+        app = self.make('Text')
+        self.wm.term.mode = 'xterm'                # a terminal window: no framebuffer
+        app.enter_gfx()
+        self.assertIsNone(app.gfx)
+        self.assertTrue(any('graphics' in t.lower() for t in self.wm.toasts))

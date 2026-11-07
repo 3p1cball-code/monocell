@@ -61,7 +61,10 @@ Voraussetzungen: Python ≥ 3.9, ein UTF-8-fähiges Terminal. Optional, aber emp
 `chromium` (JS-Webseiten), `pw-cat`/`pacat`/`aplay` (Ton), **poppler-utils**
 (`pdftocairo`, `pdftoppm`, `pdftotext`, `pdfinfo` – PDF-Reader), `yt-dlp` (YouTube),
 `opencode` (Agent-TUI, lokal oder per SSH auf einem anderen Rechner),
-`NetworkManager`/`nmcli` (WLAN-Auswahl und Umschalten).
+`NetworkManager`/`nmcli` (WLAN-Auswahl und Umschalten). Für die Grafikspiele:
+**chocolate-doom** (Doom), **ioquake3** + Quake-3-Daten, **openarena** (frei),
+**freedoom** (WAD); die Textspiele kommen aus Debian bzw. Brogue CE/doom-ascii
+aus dem Quelltext.
 
 ## Bedienung
 
@@ -73,7 +76,7 @@ unter dem Zeiger – im Terminal durch den Scrollback, in Listen und Seiten.
 
 | Taste | Wirkung |
 |---|---|
-| `F12` / `Alt+Space` | Startmenü (tippen filtert) |
+| `F12` / `Alt+Space` | Startmenü (Kategorien öffnen ein Untermenü rechts; tippen filtert) |
 | `Alt+Tab` / `Alt+P` | nächstes / vorheriges Fenster |
 | `Alt+1…9` | Fenster N fokussieren |
 | `Alt+Q` | Fenster schließen |
@@ -90,6 +93,11 @@ unter dem Zeiger – im Terminal durch den Scrollback, in Listen und Seiten.
 | `Alt+0` | Ton stumm / wieder an |
 | `Alt+-` / `Alt++` | Helligkeit dunkler / heller |
 | `Alt+PgDn` / `Alt+PgUp` | Lautstärke leiser / lauter |
+
+Das **Startmenü** listet nur die Kategorien (Apps, Office, Media, Games, System,
+Tools, About). Klick, Hover, `→` oder `Enter` öffnet die Apps rechts daneben;
+`←` oder `Esc` schließt das Untermenü, ein zweites `Esc` das Menü. Tippen filtert
+weiterhin über alle Apps und zeigt die Treffer als flache Liste.
 
 Die Apps haben eigene Tasten (im Editor `Ctrl+S/O/F`, im Browser `Ctrl+L`, `Tab`,
 `Alt+←`, `Ctrl+D`, `Ctrl+F`, in der Musik `Leertaste`, `n`/`p`, `←`/`→`, …).
@@ -108,8 +116,12 @@ Helligkeit braucht Schreibrechte auf `/sys/class/backlight/*/brightness` – daf
 gibt es eine udev-Regel in `deploy/x61s/`. WLAN-Netze wählen, Passwort eingeben
 und das Radio ab-/anschalten: Startmenü → System → **Network**
 (NetworkManager/`nmcli`). Bei Captive Portals (z. B. ICE-WLAN) zeigt die App
-`sign-in`; **`p`/Portal** öffnet den Browser mit der Anmeldeseite (ICE direkt
-über `wifi.bahn.de`, sonst Gateway/`neverssl.com`).
+`sign-in`; **`p`/Portal** (bei Bahn-Netzen **Bahn WLAN**) öffnet den Browser mit
+der Anmeldeseite gleich im Grafikmodus: WIFI@DB über `wifi.bahn.de`, WIFIonICE
+über `login.wifionice.de`, sonst Gateway/`neverssl.com`. Beide Bahn-Logins stehen
+auch auf der Browser-Startseite und im Browser-Menü. Bluetooth-Geräte koppeln und
+verbinden: Startmenü → System → **Bluetooth**, oder Klick auf das Bluetooth-Symbol
+in der Taskleiste (`bluetoothctl`/BlueZ, mit Pairing-Agent).
 
 ### Zwischenablage
 
@@ -155,6 +167,8 @@ monocell-clip --clear
   Links, Formulare, Tabellen, Symbole und Bilder als geditherte Blöcke. `Ctrl+L`
   Adresszeile, `Tab` Links, `Alt+←/→` oder `Backspace` Verlauf, `Ctrl+D` Lesezeichen,
   `Ctrl+F` suchen. Erkennt die Textansicht eine reine JavaScript-Seite, sagt sie es.
+  Die Startseite führt unter „WLAN login pages“ die Bahn-Logins (WIFI@DB,
+  WIFIonICE) mit einem Klick; das Browser-Menü ebenso.
   **`Ctrl+G`** (oder `Gfx` in der Leiste) zeigt dieselbe Seite als **echte Pixel**: ein
   headless Chromium/Brave rendert sie und schickt über das DevTools-Protokoll ein Bild,
   sobald sich etwas ändert (kein Dauerfeuer; die Seite wartet auf unsere Bestätigung,
@@ -200,22 +214,37 @@ monocell-clip --clear
   Fit-Seite/-Breite, Zoom), **Text** zeigt den extrahierten Text (`pdftotext`) zum Lesen,
   Markieren und Kopieren, **ASCII** zeichnet die Seite als ASCII-Art (Tinte als Zeichen auf
   dunklem Grund).
-* **Writer** – WYSIWYG-Wortprozessor: die Seite wird beim Schreiben so gezeigt, wie
-  sie gedruckt wird (Blatt 80×66 Zeichen, Rand, `Seite k/N`, Umbruch nur zwischen
-  Zeilen). **Große Schrift** als FIGlet direkt im Text (`S1`/`S2`/`S3`, `Ctrl+G`;
-  Graceful für S2, Big für S3, in den Einstellungen umstellbar), **Unterstreichen**
-  mit `Ctrl+U` (`-`) und `Alt+U`/`U2` (`=`), **Bilder** schweben an einem Absatz und
-  der Text fließt drumherum (ziehen, `#`-Ecke skaliert, `W` wechselt die Umbruchart;
-  Datei-Syntax `![alt](pfad){x=4 dy=1 w=30 wrap=square}`). Cursor, Auswahl und Klicks
-  liegen auf der gerenderten Seite, Auto-Format beim Tippen (`# `, `- `, `1. `, `> `,
-  `---`, ```` ``` ````), Undo/Redo, formatbewahrendes Kopieren. `F5` schaltet auf die
-  Markdown-Quelle; `Ctrl+P` druckt über PPDS für den IBM Proprinter (10 cpi/6 lpi,
-  Seitenvorschub), Bilder als Zeichen mit transparentem Schwarz. `.docx`/`.odt`
-  importieren. **Export:** `.docx` (Bilder werden echt eingebettet, inline und
-  seitenbreit skaliert; fehlende Bilder bleiben als `[Bild: alt]`), `TXT` als
-  reiner Text ohne Markup (Listen behalten `- `, Bilder werden zu `[Bild: alt]`)
-  und `.md` über Speichern/Speichern unter. Kein Kursiv – Konsole und Nadeldrucker können es
-  nicht.
+* **Writer** – WYSIWYG-Wortprozessor für den Nadeldrucker: die Seite wird beim
+  Schreiben so gezeigt, wie sie gedruckt wird (Blatt mit Rand, `Seite k/N`, Umbruch nur
+  zwischen Zeilen, Kopf- und Fußzeile). **Menüleiste** mit `F10` bzw. `Alt+F/E/O/I/V`
+  (Datei, Bearbeiten, Format, Einfügen, Ansicht), darunter eine Formatleiste:
+  Absatzformat (Text, Überschrift 1–3, Zitat, Listen, Code), `B`, `U`, `U2`,
+  Schriftgröße und Ausrichtung (`Ctrl+E` schaltet links/zentriert/rechts/Blocksatz).
+  **Seiteneinrichtung** pro Dokument: Papier (A4, Letter, Endlospapier 11"/12"),
+  10/12 Zeichen pro Zoll, 6/8 Zeilen pro Zoll, Ränder, Kopf-/Fußzeile mit
+  `{page} {pages} {title} {date}`. **Schriften** (Graceful, Block, Block 3D, Big …)
+  stehen im Dokument (Format → Schriften, mit Vorschau und Zeichen-pro-Zeile) und
+  werden mit ihm gespeichert; alte Einstellungen aus den Systemeinstellungen gibt es
+  nicht mehr. **Große Schrift** als FIGlet direkt im Text (`S1`/`S2`/`S3`, `Ctrl+G`),
+  **Block 3D** als neue Pixel-Schrift (3×5-Raster, zwei Zellen pro Pixel, Schatten
+  `:` eine Zelle rechts/unter – passt auf eine 68er-Zeile). **Unterstreichen** mit
+  `Ctrl+U` (`-`) und `Alt+U`/`U2` (`=`), **Bilder** schweben an einem Absatz, der Text
+  fließt drumherum (ziehen, `#`-Ecke skaliert, `W` wechselt den Umbruch, `G` schaltet
+  zwischen Grafik- und Zeichendruck); Datei-Syntax
+  `![alt](pfad){x=4 dy=1 w=30 wrap=square print=text}`. **Tabellen** als
+  Markdown-Gitter (`| a | b |`, Trennzeile `|---:|` für rechtsbündig, `Tab` in die
+  nächste Zelle), **Seitenumbruch** `Ctrl+Enter` bzw. `<pagebreak>`, Auto-Format beim
+  Tippen (`# `, `- `, `1. `, `> `, `---`, ```` ``` ````, `| … |`). Suchen/Ersetzen
+  (`Ctrl+F`, `F3`), Undo/Redo, formatbewahrendes Kopieren, Umriss-Spalte, Fokusmodus.
+  `F5` schaltet auf die Markdown-Quelle. **Drucken** (`Ctrl+P`): IBM Proprinter X24E
+  (PPDS, Zeichensatz 2 für Umlaute, 10/12 cpi, 6/8 lpi, Entwurf/Briefqualität,
+  Seitenbereich, Kopien), Bilder als 24-Nadel-Bitgrafik (180 dpi, Floyd-Steinberg,
+  Text der Bildzeilen mitgerastert) oder als Zeichen; ohne Gerät als `.prn`-Datei.
+  `F6` zeigt die **Druckvorschau** als gerasterte Seite im Framebuffer (wie der
+  Drucker sie setzt, mit Seiten blättern). Vorlagen für Brief, Flyer und Notizen.
+  Import `.docx`/`.odt`, Export `.docx` (mit Tabellen, Ausrichtung, Seitenumbrüchen
+  und eingebetteten Bildern) und `TXT` (wie gedruckt, mit Kopf-/Fußzeile). Kein Kursiv –
+  Konsole und Nadeldrucker können es nicht.
 * **Sheets** – Formeln (`=SUM(A1:A5)`, `IF`, `ROUND`, …), CSV/TSV/XLSX/ODS lesen,
   CSV/XLSX/nativ schreiben, Sortieren, Spaltenbreiten.
 * **Rechner** – Ausdrücke, Funktionen, Verlauf (`2^10+sqrt(16)`).
@@ -259,7 +288,8 @@ monocell-clip --clear
   Tasten im Grafikmodus: `c` Look, `d` Dithering an/aus, `s` Scanlines, `o` Original
   (volle Auflösung und Farbe, ohne Palette – für Texte und Details),
   `Leertaste`/Klick Pause, Pfeile spulen, `+`/`-` Lautstärke, `g`/`Esc` zurück zum Desktop.
-  Ein OSD in 3×5-Pixelschrift zeigt Zeit und Modus; es wird im Speicher in das Bild
+  Ein OSD in 3×5-Pixelschrift (2×2-Pixelblöcke, halb so groß wie ein Video-Pixel –
+  auch im Original-Modus) zeigt Zeit und Modus; es wird im Speicher in das Bild
   gesetzt und mit ihm in einem Schreibvorgang ausgegeben, damit es nicht flackert. Die
   ganze Pixelarbeit macht ffmpeg in C (Python kopiert nur fertige Frames); 25 fps hält der
   X61s auch bei 1080p mit Ton. Fällt das Bild mehr als 3 s hinter den Ton, startet nur der
@@ -313,6 +343,21 @@ monocell-clip --clear
   Leben. Pfeile/WASD laufen, `Space`/`↑` springen, `S`/`↓` stoppen, `P` pausiert.
   Die Level liegen als ASCII-Karten in `monocell/apps/jump.py` und lassen sich
   dort direkt erweitern.
+* **Spiele (extern)** – Startmenü → Games startet die installierten Spiele
+  **bildschirmfüllend und ohne Fenster**: Dungeon Crawl (DCSS), Cataclysm, Brogue,
+  NetHack, Doom (Text über `doom-ascii`, Grafik über Chocolate Doom), OpenArena,
+  Quake 3 Arena (ioquake3, braucht die Retail-Daten in `~/.q3a/baseq3/`), vitetris,
+  Nudoku, FreeSweep, Solitaire, Pac-Man, nInvaders und Moon Buggy. Textspiele
+  übernehmen kurz die Konsole (wie der Lockscreen), Grafikspiele nutzen SDL/KMSDRM;
+  nach dem Beenden ist der Desktop wieder da. **OpenArena** läuft über **Quake3e** mit
+  internem 800×600-Render und linearem Upscale auf 1024×768 (`r_fbo 1`,
+  `r_renderScale 3`); die freien OpenArena-0.8.8-Daten liegen unter
+  `/usr/local/share/openarena-0.8.8`. Ohne Quake3e fällt es auf ioquake3 zurück.
+  **Quake 3 Arena** nutzt Quake3e, sobald die Retail-Daten in `~/.q3a` liegen.
+  **Half-Life** läuft über **Xash3D FWGS** (i386) mit den Steam-Daten unter
+  `/usr/local/share/half-life/valve`; das Spiel liegt unter Games → Half-Life.
+  Doom läuft mit Freedoom; Quake 3 erklärt ohne Daten, wohin die `pak*.pk3` gehören,
+  und bietet OpenArena an.
 * **System** – Hardware, CPU-Kerne, Speicher, Datenträger, Netz, Batterie (mit
   Restzeit/Ladezeit), Temperatur, **Lüfterdrehzahl**, Prozessliste (SIGTERM/SIGKILL)
   und die eigenen Fenster samt Timern/Threads.
@@ -325,7 +370,12 @@ monocell-clip --clear
 * **About** – warum dieses X61s existiert.
 * **Network** – WLAN-Liste mit Signalstärke und Sicherheit, verbinden (maskierter
   Passwort-Dialog), trennen, Radio an/aus und Rescan über NetworkManager (`nmcli`);
-  erkennt Captive Portals (`sign-in`) und öffnet sie per `p`/Portal im Browser.
+  erkennt Captive Portals (`sign-in`) und öffnet sie per `p`/Portal im Browser;
+  Bahn-Netze (WIFI@DB, WIFIonICE) auch ohne Redirect, mit der richtigen Login-Seite.
+* **Bluetooth** – Adapterstatus (Name, Adresse, BT-Version), Geräte in der Nähe mit
+  Signalstärke und Batteriestand, koppeln, verbinden/trennen, vertrauen und entfernen;
+  während des Scans aktualisiert sich die Liste, `d` macht den Rechner 3 Minuten lang
+  auffindbar (z. B. fürs Handy). Läuft über `bluetoothctl` (BlueZ) samt Pairing-Agent.
 * **Updates** – Debian-Updates suchen und installieren: Liste ohne root
   (`apt list --upgradable`), Sicherheitsupdates zuerst, alte → neue Version und die
   letzte Suche. `Check` erneuert die Paketlisten, `Install all` installiert nach
@@ -459,7 +509,12 @@ Für UTF-8-Eingabe (Umlaute) auf der Konsole: `sudo kbd_mode -u` (dauerhaft z. B
 `/etc/rc.local` oder systemd-Unit).
 
 Für eine schärfere Schrift auf dem VT: `sudo setfont ter-116n` (kbd/fonts-Paket) und
-`sudo dpkg-reconfigure console-setup`. monocell braucht kein `gpm`, kein X, kein
+`sudo dpkg-reconfigure console-setup`. **Mehr Zeilen und Spalten** gibt es mit einem
+kleineren Font: Monocell bringt Terminus **6x12**, 8x14, 8x16 (auch fett), 10x20 und
+12x24 mit (OFL) – unter Einstellungen → Appearance → Theme → *Font* steht hinter jedem
+Eintrag, welches Raster er auf dem aktuellen Bildschirm ergibt. Mit 6x12 zeigt der
+X61s **170x64** statt 113x48 Zeichen; ASCII-Bilder und Video gewinnen dadurch
+deutlich (Fenster mit `Alt+M` maximieren, laufendes Video setzt sich neu). monocell braucht kein `gpm`, kein X, kein
 Framebuffer-Programm – nur eine Konsole mit ANSI-Farben. Für den Grafikmodus des
 Videoplayers muss der Benutzer in der Gruppe `video` sein (Schreibrecht auf `/dev/fb0`).
 
@@ -548,7 +603,8 @@ sudo deploy/x61s/install-vt.sh --user ariedel      # Dienst auf tty2
 ```
 
 **Zellgröße:** Auf dem Kernel-VT meldet `TIOCGWINSZ` keine Pixelmaße; die Zellhöhe/Breite
-kommt deshalb aus dem geladenen Konsolenfont (Fixed 8×16 → 2,0; IBM 3270 9×16 → 1,78).
+kommt deshalb aus dem geladenen Konsolenfont (Fixed 8×16 → 2,0; IBM 3270 9×16 → 1,78;
+Terminus 6×12 → 2,0).
 Videos, Bilder, PDF-Seiten und der Desktop-Hintergrund rechnen damit und bleiben
 unverzerrt – ein 4:3-Video füllt im Vollbild ein 4:3-Blatt ohne Ränder. Ein eigener
 Wert lässt sich unter Einstellungen → Images & video setzen (0 = automatisch).

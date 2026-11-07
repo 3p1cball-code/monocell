@@ -19,6 +19,8 @@ def main(argv=None):
     ap.add_argument('--color', default=None, help='auto|truecolor|palette|linux|ansi')
     ap.add_argument('--tile', action='store_true', help='tile the opened windows')
     ap.add_argument('--lowmem', action='store_true', help='low-memory profile: plain desktop, no shadows, pixel video, lite web')
+    ap.add_argument('--trd-port', type=int, default=0, help='TRD server port (0 = ephemeral, 127.0.0.1 only)')
+    ap.add_argument('--trd-meta', default='', help='TRD meta file (default: ~/.cache/monocell/trd.json)')
     ap.add_argument('files', nargs='*', help='files to open')
     args = ap.parse_args(argv)
 
@@ -42,6 +44,12 @@ def main(argv=None):
     apply_console_font(cfg.get('font'))
     term = Terminal(theme, args.color or cfg.get('color_mode', 'auto'))
     wm = WM(term, loop, cfg, theme)
+    remote = None
+    try:
+        from . import remote
+        remote.start(loop, wm, term, cfg, port=args.trd_port, meta_path=args.trd_meta or None)
+    except Exception:
+        util.log('trd unavailable: ' + traceback.format_exc())
     last_input = [0.0]
 
     def on_stdin(fd):
@@ -76,9 +84,18 @@ def main(argv=None):
     def on_winch(sig, frame):
         loop.call_soon_threadsafe(wm.on_resize)
 
+    restart = [False]
+
+    def on_restart(sig, frame):
+        # SIGUSR1: leave the loop and exec monocell again - new code, same tty,
+        # no new login (a deploy in another terminal can then restart it)
+        restart[0] = True
+        loop.call_soon_threadsafe(wm.quit)
+
     signal.signal(signal.SIGWINCH, on_winch)
     signal.signal(signal.SIGTERM, lambda s, f: loop.call_soon_threadsafe(wm.quit))
     signal.signal(signal.SIGHUP, lambda s, f: loop.call_soon_threadsafe(wm.quit))
+    signal.signal(signal.SIGUSR1, on_restart)
     signal.signal(signal.SIGCHLD, signal.SIG_DFL)
 
     term.start()
@@ -116,6 +133,11 @@ def main(argv=None):
         print(tb, file=sys.stderr)
         return 1
     finally:
+        if remote:
+            try:
+                remote.stop()
+            except Exception:
+                pass
         if hotkeys:
             hotkeys.close_all()
         for win in list(wm.windows):
@@ -130,6 +152,14 @@ def main(argv=None):
         pass
     term.stop()
     os.set_blocking(0, True)
+    if restart[0]:
+        util.log('restart on SIGUSR1')
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.execv(sys.executable, [sys.executable, '-m', 'monocell'] + sys.argv[1:])
+        except OSError:
+            util.log('restart failed: ' + traceback.format_exc())
     return 0
 
 

@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.3.2 — 2026-11-07
+
+- **Writer for the dot-matrix printer** (IBM Proprinter X24E, PPDS). The page is the
+  sheet: paper size, 10/12 cpi, 6/8 lpi and the margins are document settings
+  (File -> Page setup), header and footer with `{page} {pages} {title} {date}`.
+- **One place for the fonts**: Format -> Fonts sets the large/huge FIGlet faces per
+  document (saved in a `<!-- writer: ... -->` line, invisible in other viewers) with
+  a live preview and "about N letters per line"; the Writer's font entries in
+  Settings -> Tools are gone. Old `3d-ascii` settings map to the new font.
+- **New 3D font "Block 3D"** (and flat "Block"): 3x5 pixel letters at two cells per
+  pixel with a one-cell diagonal extrusion - compact enough for real headings
+  (about nine letters on a 68-column line), built by `tools/make_block_font.py`.
+- **Menu bar** (F10, Alt+F/E/O/I/V) and a format bar: paragraph styles, bold, single
+  and double underline, size, alignment, table, picture, fonts, plus a ruler.
+- **Paragraphs** can be centered, right-aligned or justified (`{.center}` in the
+  source, `Ctrl+E` cycles), **tables** are Markdown pipe tables drawn as a grid
+  (`Tab` moves between cells), `<pagebreak>` / Ctrl+Enter starts a new sheet.
+- **Printing**: quality draft/letter, page range, copies; pictures print as 24-pin
+  bit images (180 dpi, Floyd-Steinberg, the text of those rows rasterised with them)
+  or as characters, per picture (`G`) or for the whole job. Character set 2 is
+  selected so the umlauts print. A test page checks alignment of text and graphics.
+- **Print preview (F6)**: the sheets as dots on the framebuffer - exactly what the
+  printer will put on paper, page by page, fit-width/whole page/180 dpi.
+- **Find and replace** (Ctrl+F, F3), templates (letter, flyer, notes), TXT export as
+  printed, DOCX export with tables, alignment and page breaks.
+- **Smaller console fonts** for more characters: Terminus 6x12 (170x64 on the
+  1024x768 X61s screen instead of 113x48), 8x14, 8x16 bold, 10x20 and 12x24 are
+  bundled (OFL) and offered in Settings -> Appearance -> Theme -> Font with their
+  grid; ASCII pictures and video gain a lot of cells from this. The Writer's bit
+  images print with a fine 8x16 font regardless of the screen font.
+- **Smaller OSD in the graphics mode**: the info text and the bar of video, picture,
+  map and browser now use 2x2 pixel blocks instead of 4x4 - half the size, and the
+  same in the full (original) resolution. It no longer covers half the picture.
+- **TRD audio fixed**: the server padded silence into the stream whenever the
+  capture was only *late* (parec delivers in ~80 ms bursts), cutting holes into the
+  sound - that was the intermittent static. It now lets the stream lag (the client
+  buffers 400 ms) and only fills silence when the capture has really been quiet for
+  400 ms; buffer trims never cut a sample in half. The client also only writes whole
+  s16le frames to the player.
+- **SIGUSR1 restarts monocell in place** (new code, same tty, no new login).
+- Tests: 676.
+
 ## 1.3.1 — 2026-11-05
 
 - **Zoom in the browser's graphics mode**: `+` / `-` (also `Alt++` / `Alt+-`, or

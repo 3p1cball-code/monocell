@@ -83,7 +83,7 @@ class TestRenderer(unittest.TestCase):
         rows = self.r.render('# AB\n')
         self.assertGreaterEqual(len(rows), 6)
         self.assertTrue(all(ord(c) < 128 for chars, _ in rows for c in chars))
-        self.assertTrue(any('/' in chars or '|' in chars for chars, _ in rows))
+        self.assertTrue(any(c in chars for chars, _ in rows for c in '/|#'))
 
     def test_empty_document(self):
         self.assertEqual(self.r.render('\n'), [])

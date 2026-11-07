@@ -8,8 +8,10 @@ console and on a dot-matrix printer.
 compose() returns the rows of a run *and* where every glyph starts and ends,
 so the Writer can map a cursor position to a column inside the big text.
 
-Bundled fonts (monocell/fonts/figlet): Graceful (Mikhael Goikhman, 2002) and
-Standard, Small, Slant, Big (Glenn Chappell & Ian Chai, figlet distribution).
+Bundled fonts (monocell/fonts/figlet): Graceful (Mikhael Goikhman, 2002),
+Standard, Small, Slant, Big (Glenn Chappell & Ian Chai, figlet distribution)
+and Block / Block 3D (built from the public-domain misc-fixed 6x10 by
+tools/make_block_font.py).
 """
 import os
 import re
@@ -284,7 +286,27 @@ def parse(data, name='font'):
     return Font(name, height, baseline, hardblank, mode, glyphs)
 
 
+ALIASES = {'3d-ascii': 'block3d', '3d': 'block3d'}
+LABELS = {'block3d': 'Block 3D', 'block': 'Block', 'graceful': 'Graceful', 'big': 'Big',
+          'standard': 'Standard', 'small': 'Small', 'slant': 'Slant'}
+ORDER = ['block3d', 'block', 'big', 'standard', 'graceful', 'slant', 'small']
+
+
+def canonical(name):
+    name = (name or '').strip().lower()
+    return ALIASES.get(name, name)
+
+
+def label(name):
+    return LABELS.get(name, name.replace('-', ' ').replace('_', ' ').title())
+
+
 def available():
+    names = [n for n in _available() if n not in ALIASES]
+    return sorted(names, key=lambda n: (ORDER.index(n) if n in ORDER else len(ORDER), n))
+
+
+def _available():
     names = []
     for d in (FONT_DIR, USER_FONT_DIR):
         try:
@@ -299,7 +321,7 @@ def available():
 
 
 def load(name):
-    name = (name or 'graceful').lower()
+    name = canonical(name or 'graceful')
     if name in _FONTS:
         return _FONTS[name]
     for d in (USER_FONT_DIR, FONT_DIR):

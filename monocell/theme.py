@@ -199,16 +199,19 @@ FONT_DIRS = (
     os.path.expanduser('~/.local/share/monocell/fonts'),
 )
 FONT_CHOICES = (
+    # label, file; the grid is for a 1024x768 console - smaller glyphs mean more
+    # cells, which is what ASCII pictures and video gain from
+    ('Terminus 6x12', 'Lat15-Terminus12x6.psf.gz'),
+    ('Terminus 8x14', 'Lat15-Terminus14.psf.gz'),
+    ('Terminus 8x16', 'Lat15-Terminus16.psf.gz'),
+    ('Terminus 8x16 bold', 'Lat15-TerminusBold16.psf.gz'),
+    ('Terminus 10x20', 'Lat15-Terminus20x10.psf.gz'),
+    ('Terminus 12x24', 'Lat15-Terminus24x12.psf.gz'),
     ('Fixed 8x16', 'Lat15-Fixed16.psf.gz'),
     ('Fixed 8x14', 'Lat15-Fixed14.psf.gz'),
     ('IBM VGA 8x16', 'Lat15-VGA16.psf.gz'),
     ('IBM VGA 8x14', 'Lat15-VGA14.psf.gz'),
     ('IBM 3270 9x16', 'Lat15-3270.psf.gz'),
-    ('Terminus 8x16', 'Lat15-Terminus16.psf.gz'),
-    ('Terminus 8x16 bold', 'Lat15-TerminusBold16.psf.gz'),
-    ('Terminus 8x14', 'Lat15-Terminus14.psf.gz'),
-    ('Terminus 10x20', 'Lat15-Terminus20x10.psf.gz'),
-    ('Terminus 12x24', 'Lat15-Terminus24x12.psf.gz'),
 )
 
 
@@ -326,10 +329,9 @@ DEFAULT_CONFIG = {
     'ascii_charset': 'full',      # full | simple | shades
     'strict_ascii': False,
     'image_mode': 'blend',        # blend | pixel | ascii | mono
-    'writer_font2': 'graceful',   # FIGlet font for <size2> and H2 (monocell/fonts/figlet)
-    'writer_font3': 'big',        # FIGlet font for <size3> and H1
-    'writer_page_w': 80,          # sheet width in characters (printer: 80 columns)
-    'writer_page_lines': 66,      # sheet length in lines (6 lpi, 11 inch)
+    'print_font': 'Lat15-Fixed16.psf.gz',   # text in printed bit images (180 dpi)
+    'writer_font2': 'graceful',   # default FIGlet font for <size2>/H2 (per document)
+    'writer_font3': 'block3d',    # default FIGlet font for <size3>/H1 (per document)
     'dither': 'bayer4',           # bayer4 | bayer8 | fs | none
     'video_mode': 'pixel',
     'gfx_look': 'vga',            # graphics mode (Linux console): vga|ega|theme|cga|amber|green

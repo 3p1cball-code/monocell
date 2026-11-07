@@ -1131,3 +1131,28 @@ class TestAppearanceEditor(unittest.TestCase):
         ed.post_draw(cv, True)
         seen = {k[1] for *_, k in ed.zones if k[0] == 'pv'}
         self.assertEqual(set(ITEM_KEYS) - seen, set())
+
+
+class TestConsoleFontChoices(unittest.TestCase):
+    def test_every_offered_font_resolves(self):
+        from monocell import theme
+        sizes = {'Lat15-Terminus12x6.psf.gz': (6, 12),
+                 'Lat15-Terminus14.psf.gz': (8, 14),
+                 'Lat15-Terminus16.psf.gz': (8, 16),
+                 'Lat15-TerminusBold16.psf.gz': (8, 16),
+                 'Lat15-Terminus20x10.psf.gz': (10, 20),
+                 'Lat15-Terminus24x12.psf.gz': (12, 24),
+                 'Lat15-Fixed16.psf.gz': (8, 16), 'Lat15-Fixed14.psf.gz': (8, 14),
+                 'Lat15-VGA16.psf.gz': (8, 16), 'Lat15-VGA14.psf.gz': (8, 14),
+                 'Lat15-3270.psf.gz': (9, 16)}
+        for label, name in theme.FONT_CHOICES:
+            self.assertIsNotNone(theme.console_font_path(name), name)
+            self.assertEqual(theme.console_font_cell(name), sizes[name], label)
+
+    def test_small_font_gives_more_cells(self):
+        from monocell import theme
+        small = theme.console_font_cell('Lat15-Terminus12x6.psf.gz')
+        wide = theme.console_font_cell('Lat15-3270.psf.gz')
+        self.assertEqual((1024 // small[0], 768 // small[1]), (170, 64))
+        self.assertGreater(1024 // small[0], 1024 // wide[0])
+        self.assertGreater(768 // small[1], 768 // wide[1])

@@ -1,7 +1,13 @@
-"""Writer: WYSIWYG word processor on the cell grid.
+"""Writer: WYSIWYG word processor on the cell grid, made for a dot-matrix printer.
 
-Big FIGlet text, -/= underlines, floating pictures with text wrap; stored as
-the Writer Markdown dialect (see richdoc). .docx/.odt import, .docx export.
+What you see is the sheet the IBM Proprinter X24E prints: page size, pitch and
+margins come from the document (File > Page setup), large text is set with
+FIGlet fonts chosen per document (Format > Fonts), pictures float with text
+wrap and print either as characters or as 24-pin bit images. F6 shows the
+paper in dots (framebuffer), Ctrl+P prints. Menus: F10 or Alt+F/E/O/I/V.
+
+Stored as the Writer Markdown dialect (see richdoc). .docx/.odt import,
+.docx/.txt export.
 """
 import os
 import re
@@ -13,8 +19,10 @@ from xml.sax.saxutils import escape
 from ..app import App
 from ..textarea import TextArea
 from ..util import fit, shorten_path
-from ..widgets import button, sb_draw, sb_geom
-from .. import imaging, printer, richdoc, writer_doc
+from ..term import Key
+from ..util import log as util_log
+from ..widgets import button, sb_draw, sb_geom, Menu, MenuItem, TextField
+from .. import figlet, imaging, printer, richdoc, writer_doc
 
 W_NS = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
 TAG_RE = re.compile(r'</?(?:u[123]?|size[23]|b|i)>', re.I)
@@ -175,7 +183,41 @@ def write_docx(path, text, base_dir=''):
     media = []          # (name, bytes, content_type)
     rels = [('rId1', 'styles', 'styles.xml')]
     paras = []
+    tbl = []                       # rows of the table being collected
+
+    def flush_table():
+        if not tbl:
+            return
+        ncol = max(len(r) for r in tbl)
+        out = ['<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>']
+        for side in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+            out.append('<w:%s w:val="single" w:sz="4" w:space="0" w:color="000000"/>' % side)
+        out.append('</w:tblBorders></w:tblPr>')
+        for cells in tbl:
+            out.append('<w:tr>')
+            for c in range(ncol):
+                xml = cells[c] if c < len(cells) else ''
+                out.append('<w:tc><w:p>%s</w:p></w:tc>' % xml)
+            out.append('</w:tr>')
+        out.append('</w:tbl>')
+        paras.append(''.join(out))
+        del tbl[:]
+
     for p in doc.paras:
+        if p.kind == 'tsep':
+            continue
+        if p.kind == 'table':
+            cells, k = [], 0
+            for part in p.text.split('|'):
+                q = richdoc.Para('p', part, p.st[k:k + len(part)])
+                cells.append(_docx_runs(q))
+                k += len(part) + 1
+            tbl.append(cells)
+            continue
+        flush_table()
+        if p.kind == 'pagebreak':
+            paras.append('<w:p><w:r><w:br w:type="page"/></w:r></w:p>')
+            continue
         for f in floats.get(id(p), ()):
             src = os.path.expanduser(f.path)
             if not os.path.isabs(src):
@@ -209,11 +251,15 @@ def write_docx(path, text, base_dir=''):
             continue
         elif p.kind == 'code':
             style = 'Code'
-        if not p.text and style is None:
+        jc = {'center': 'center', 'right': 'right', 'justify': 'both'}.get(p.align or '')
+        if not p.text and style is None and not jc:
             paras.append('<w:p/>')
             continue
-        ppr = '<w:pPr><w:pStyle w:val="%s"/></w:pPr>' % style if style else ''
+        props = ('<w:pStyle w:val="%s"/>' % style if style else '') + \
+            ('<w:jc w:val="%s"/>' % jc if jc else '')
+        ppr = '<w:pPr>%s</w:pPr>' % props if props else ''
         paras.append('<w:p>%s%s</w:p>' % (ppr, _docx_runs(p)))
+    flush_table()
     doc_xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
                'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
@@ -275,8 +321,303 @@ def write_docx(path, text, base_dir=''):
 INLINE = re.compile(r'(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*|_[^_\n]+_)|(`[^`\n]+`)|(\[[^\]\n]+\]\([^)\n]+\))')
 WORD = re.compile(r'\w+|[^\w\s]+')
 AUTO_PREFIX = re.compile(r'(#{1,6})|([-*+])|(\d+[.)])|(>)')
-HELP = ('Ctrl+B bold  Ctrl+U underline  Alt+U double  Ctrl+G size  '
-        'Img: drag = move, corner # = resize, W = wrap  F5 source')
+
+# paragraph styles of the Format bar: (label, kind, level / list marker)
+STYLES = [('Text', 'p', 0), ('Heading 1', 'h', 1), ('Heading 2', 'h', 2), ('Heading 3', 'h', 3),
+          ('Quote', 'quote', 0), ('Bullet list', 'li', '-'), ('Numbered list', 'li', '1.'),
+          ('Code', 'code', 0)]
+SIZES = [(1, 'Normal'), (2, 'Large'), (3, 'Huge')]
+ALIGN_NAMES = [('', 'Left', 'L'), ('center', 'Center', 'C'), ('right', 'Right', 'R'),
+               ('justify', 'Justify', 'J')]
+MENUS = [('File', 'alt+f'), ('Edit', 'alt+e'), ('Format', 'alt+o'), ('Insert', 'alt+i'),
+         ('View', 'alt+v')]
+
+TEMPLATES = {
+    'letter': ('letter.md', '''<!-- writer: footer="" -->
+Vorname Name
+Strasse 1
+12345 Ort
+
+Firma
+z. Hd. Frau Muster
+Strasse 2
+12345 Ort
+
+Ort, den {date} {.right}
+
+**Betreff: Ihr Schreiben vom ...**
+
+Sehr geehrte Damen und Herren,
+
+hier steht der Text des Briefes. Absaetze im Blocksatz lesen sich auf dem Nadeldrucker ruhig und sauber, deshalb steht dieser hier im Blocksatz. {.justify}
+
+Mit freundlichen Gruessen
+
+
+
+Vorname Name
+'''),
+    'flyer': ('flyer.md', '''<!-- writer: font3=block3d footer="" -->
+# Einladung {.center}
+
+## Zum Sommerfest {.center}
+
+---
+
+Am **Samstag, 1. August**, ab 15 Uhr im Hof. {.center}
+
+| Was | Wann |
+|---|---:|
+| Kaffee und Kuchen | 15:00 |
+| Grill | 18:00 |
+| Musik | 20:00 |
+
+Bitte bringt gute Laune mit. {.center}
+'''),
+    'notes': ('notes.md', '''# Notizen
+
+{date}
+
+- erster Punkt
+- zweiter Punkt
+'''),
+}
+
+
+def parse_pages(spec, total):
+    out = []
+    for part in (spec or '').replace(' ', '').split(','):
+        if not part:
+            continue
+        m = re.fullmatch(r'(\d+)(?:-(\d*))?', part)
+        if not m:
+            return []
+        a = int(m.group(1))
+        b = int(m.group(2)) if m.group(2) else (total if part.endswith('-') else a)
+        out.extend(range(max(1, a), min(total, b) + 1))
+    return sorted(set(out))
+
+
+def today():
+    return time.strftime('%d.%m.%Y')
+
+
+class BarMenu(Menu):
+    """A menu of the Writer's menu bar: Left/Right open the neighbouring menu."""
+
+    def __init__(self, wm, items, x, y, owner, index):
+        super().__init__(wm, items, x, y)
+        self.owner = owner
+        self.index = index
+
+    def on_key(self, ev):
+        if ev.key in ('left', 'right'):
+            self.wm.close_popup(self)
+            self.owner.open_menu(self.index + (1 if ev.key == 'right' else -1))
+            return True
+        if ev.key in ('f10',):
+            self.wm.close_popup(self)
+            return True
+        return super().on_key(ev)
+
+
+
+class Form:
+    """A small dialog drawn over the page: choices, text fields and buttons.
+
+    rows: dicts with key, label, kind ('choice' | 'text' | 'info'), values,
+    labels (choice), field (text). on_button(name) is called for buttons; the
+    first button is the default (Enter)."""
+
+    def __init__(self, kind, title, rows, buttons, on_button, extra=None, extra_h=0, width=66):
+        self.kind = kind
+        self.title = title
+        self.rows = rows
+        self.buttons = buttons
+        self.on_button = on_button
+        self.extra = extra
+        self.extra_h = extra_h
+        self.width = width
+        self.sel = next((i for i, r in enumerate(rows) if r['kind'] != 'info'), len(rows))
+        self.rect = (0, 0, 0, 0)
+
+    # ------------------------------------------------------------ values
+    def row(self, key):
+        for r in self.rows:
+            if r.get('key') == key:
+                return r
+        return None
+
+    def get(self, key):
+        r = self.row(key)
+        if r is None:
+            return None
+        if r['kind'] == 'text':
+            return r['field'].text
+        return r.get('value')
+
+    def items(self):
+        """Focusable things in order: row indices, then ('btn', name)."""
+        out = [i for i, r in enumerate(self.rows) if r['kind'] != 'info']
+        return out + [('btn', b) for b in self.buttons]
+
+    def focus(self):
+        it = self.items()
+        return it[self.sel] if 0 <= self.sel < len(it) else None
+
+    def move(self, d):
+        n = len(self.items())
+        if n:
+            self.sel = (self.sel + d) % n
+
+    def change(self, i, d):
+        r = self.rows[i]
+        if r['kind'] != 'choice':
+            return
+        vals = r['values']
+        k = vals.index(r['value']) if r['value'] in vals else 0
+        r['value'] = vals[(k + d) % len(vals)]
+        if r.get('on_change'):
+            r['on_change'](r['value'])
+
+    # ------------------------------------------------------------ input
+    def key(self, ev):
+        k = ev.key
+        f = self.focus()
+        if k == 'esc':
+            self.on_button(self.buttons[-1])
+            return True
+        if k in ('tab', 'down'):
+            self.move(1)
+            return True
+        if k in ('shift+tab', 'up'):
+            self.move(-1)
+            return True
+        if k == 'enter':
+            if isinstance(f, tuple):
+                self.on_button(f[1])
+            elif f is not None and self.rows[f]['kind'] == 'choice' and self.rows[f].get('enter_next'):
+                self.change(f, 1)
+            else:
+                self.on_button(self.buttons[0])
+            return True
+        if isinstance(f, tuple):
+            if k in ('left', 'right'):
+                bi = self.buttons.index(f[1]) + (1 if k == 'right' else -1)
+                if 0 <= bi < len(self.buttons):
+                    self.sel = len(self.items()) - len(self.buttons) + bi
+            return True
+        if f is None:
+            return True
+        r = self.rows[f]
+        if r['kind'] == 'choice':
+            if k in ('left', 'right', ' ', 'space'):
+                self.change(f, -1 if k == 'left' else 1)
+            elif ev.char and ev.char.isalnum():       # jump to a value by its first letter
+                labels = r.get('labels') or [str(v) for v in r['values']]
+                for j in range(1, len(labels) + 1):
+                    n = (r['values'].index(r['value']) + j) % len(labels) \
+                        if r['value'] in r['values'] else j - 1
+                    if labels[n].lower().startswith(ev.char.lower()):
+                        r['value'] = r['values'][n]
+                        if r.get('on_change'):
+                            r['on_change'](r['value'])
+                        break
+            return True
+        if r['kind'] == 'text':
+            r['field'].key(ev)
+            if r.get('on_change'):
+                r['on_change'](r['field'].text)
+            return True
+        return True
+
+    def click(self, zone, ev):
+        kind = zone[0]
+        if kind == 'fbtn':
+            self.on_button(zone[1])
+            return
+        i = zone[1]
+        its = self.items()
+        if i in its:
+            self.sel = its.index(i)
+        r = self.rows[i]
+        if kind == 'form<':
+            self.change(i, -1)
+        elif kind in ('form>', 'formv'):
+            self.change(i, 1)
+        elif kind == 'formt' and r['kind'] == 'text':
+            r['field'].click(max(0, ev.x - zone[2]))
+
+    def paste(self, text):
+        f = self.focus()
+        if isinstance(f, int) and self.rows[f]['kind'] == 'text':
+            r = self.rows[f]
+            r['field'].insert(text.replace('\n', ' '))
+            if r.get('on_change'):
+                r['on_change'](r['field'].text)
+
+    # ------------------------------------------------------------ drawing
+    def draw(self, app, cv, x0, y0, w0, h0):
+        th = app.th
+        W = min(self.width, w0 - 2)
+        H = min(h0 - 1, len(self.rows) + 5 + self.extra_h)
+        x = x0 + max(0, (w0 - W) // 2)
+        y = y0 + 1
+        self.rect = (x, y, W, H)
+        bg = th.c('text', 'raised')
+        cv.fill(x, y, W, H, bg)
+        edge = th.c('dim', 'raised')
+        cv.put(x, y, '+' + '-' * (W - 2) + '+', edge)
+        cv.put(x, y + H - 1, '+' + '-' * (W - 2) + '+', edge)
+        for yy in range(y + 1, y + H - 1):
+            cv.putc(x, yy, '|', edge)
+            cv.putc(x + W - 1, yy, '|', edge)
+        cv.put(x + 2, y, ' %s ' % self.title, th.c('bright', 'raised', 1))
+        lw = min(26, max(len(r['label']) for r in self.rows) + 2) if self.rows else 10
+        foc = self.focus()
+        yy = y + 2
+        for i, r in enumerate(self.rows):
+            if yy >= y + H - 3:
+                break
+            on = foc == i
+            la = th.c('accent', 'raised', 1) if on else th.c('text', 'raised')
+            if r['kind'] == 'info':
+                cv.put(x + 2, yy, fit(r['label'], W - 4), th.c('dim', 'raised'))
+                yy += 1
+                continue
+            cv.put(x + 2, yy, fit(r['label'], lw), la)
+            vx = x + 2 + lw
+            vw = W - 4 - lw
+            if r['kind'] == 'choice':
+                labels = r.get('labels') or [str(v) for v in r['values']]
+                k = r['values'].index(r['value']) if r['value'] in r['values'] else 0
+                text = fit(labels[k], max(4, vw - 4))
+                va = th.c('on_accent', 'accent') if on else th.c('bright', 'field')
+                cv.put(vx, yy, '<', th.c('accent', 'raised', 1))
+                cv.put(vx + 1, yy, ' %s ' % text, va)
+                cv.put(vx + 3 + len(text), yy, '>', th.c('accent', 'raised', 1))
+                app.zone(vx, yy, 1, 1, ('form<', i))
+                app.zone(vx + 1, yy, len(text) + 2, 1, ('formv', i))
+                app.zone(vx + 3 + len(text), yy, 1, 1, ('form>', i))
+            elif r['kind'] == 'text':
+                r['field'].draw(cv, vx, yy, vw, th, on)
+                app.zone(vx, yy, vw, 1, ('formt', i, vx))
+            app.zone(x + 1, yy, lw, 1, ('formv', i) if r['kind'] == 'choice' else ('formt', i, vx))
+            yy += 1
+        if self.extra:
+            ey = yy + 1
+            eh = y + H - 3 - ey
+            if eh > 0:
+                self.extra(cv, x + 2, ey, W - 4, eh)
+        bx = x + 2
+        by = y + H - 2
+        for b in self.buttons:
+            active = foc == ('btn', b)
+            n = len(b) + 2
+            a = th.c('on_accent', 'accent') if active else th.c('bright', 'field')
+            cv.put(bx, by, ' %s ' % b, a)
+            app.zone(bx, by, n, 1, ('fbtn', b))
+            bx += n + 2
 
 
 class Writer(App):
@@ -284,20 +625,22 @@ class Writer(App):
     name = 'writer'
     title = 'Writer'
     icon = '[W]'
-    size = (84, 28)
-    min_size = (34, 8)
+    size = (88, 30)
+    min_size = (40, 10)
     shift_select = True
 
-    def __init__(self, wm, win, path=None, **kw):
+    def __init__(self, wm, win, path=None, template=None, **kw):
         super().__init__(wm, win)
         self.ta = TextArea(wrap=True)          # source view (F5)
         self.ta.scrollbar = True
         self.ta.style = self.style
         self.path = None
         self.focus_mode = False
-        self.col = 72
+        self.show_outline = True
+        self.show_ruler = True
         self.source = False
         self.doc = richdoc.Doc()
+        self.pg = self.doc.page()
         self.cur = (0, 0)
         self.anchor = None
         self.want_x = None
@@ -305,15 +648,14 @@ class Writer(App):
         self.sel_float = None
         self.drag = None
         self.top = 0
+        self.hx = 0
         self.view_h = 1
         self.colw = 40
-        self.page_w = 80
-        self.p_margin = 5
-        self.p_margin_v = 3
-        self.rows_per_page = 60
         self.block = 69
         self.pages = 1
         self.page_x = 0
+        self.side = 0
+        self.avail = 80
         self.sb = None
         self.sb_grab = None
         self.text_x = 0
@@ -328,12 +670,20 @@ class Writer(App):
         self.lay = None
         self.lay_key = None
         self.rich_clip = None
+        self.form = None                       # open dialog (Form)
+        self.find = None                       # find/replace bar
+        self.menu_x = []
+        self.gfx = None                        # graphics print preview (fbmode.Session)
+        self.printing = False
         self.images = richdoc.ImageStore(runner=self._run_bg, on_ready=self._image_ready)
         if path:
             self.load(path)
+        elif template:
+            self.new_from_template(template, replace=True)
         else:
             self.set_doc(richdoc.parse('# Untitled\n\nStart writing. **Bold**, '
-                                       '<u>underlined</u>, <size2>big</size2>, pictures with Img.\n'))
+                                       '<u>underlined</u>, <size2>big</size2>, pictures with '
+                                       'Insert > Picture. F10 opens the menu.\n'))
             self.cur = (len(self.doc.paras) - 1, 0)
             self.modified = False
         self.update_title()
@@ -352,6 +702,7 @@ class Writer(App):
         self.anchor = None
         self.sel_float = None
         self.top = 0
+        self.hx = 0
         self.undo_stack = []
         self.redo_stack = []
         self.changed(modified=False)
@@ -406,25 +757,36 @@ class Writer(App):
         return os.path.dirname(os.path.abspath(self.path)) if self.path else os.path.expanduser('~')
 
     def layout(self, colw=None):
-        colw = colw or self.colw
         cfg = self.wm.cfg
-        key = (self.ver, colw, self.img_ver, cfg.get('image_mode'), cfg.get('dither'),
+        pg = self.pg = self.doc.page()
+        key = (self.ver, pg.key, self.img_ver, cfg.get('image_mode'), cfg.get('dither'),
                cfg.get('ascii_charset'), round(imaging.cell_aspect(self.wm), 3),
-               cfg.get('writer_font2'),
-               cfg.get('writer_font3'), tuple(self.th.rgb), id(self.th),
-               getattr(getattr(self.wm, 'term', None), 'mode', None), self.base_dir,
-               self.rows_per_page)
-        lines = int(cfg.get('writer_page_lines') or 66)
-        self.rows_per_page = max(4, lines - 2 * self.p_margin_v)
+               richdoc.setting(self.doc.settings, 'font2', cfg),
+               richdoc.setting(self.doc.settings, 'font3', cfg), tuple(self.th.rgb), id(self.th),
+               getattr(getattr(self.wm, 'term', None), 'mode', None), self.base_dir)
         if self.lay is None or self.lay_key != key:
-            self.lay = richdoc.Layout(self.wm, colw, self.base_dir, self.images, mono=True,
-                                      page=self.rows_per_page, bg_role='win_on').run(self.doc)
+            self.lay = richdoc.Layout(self.wm, pg.text_w, self.base_dir, self.images, mono=True,
+                                      page=pg.rows, bg_role='win_on',
+                                      settings=self.doc.settings).run(self.doc)
             self.lay_key = key
+        self.colw = pg.text_w
         return self.lay
+
+    @property
+    def rows_per_page(self):
+        return self.pg.rows
+
+    def doc_title(self):
+        for p in self.doc.paras:
+            if p.kind == 'h' and p.text.strip():
+                return p.text.strip()
+        return os.path.splitext(os.path.basename(self.path))[0] if self.path else 'Untitled'
 
     # ================================================================ source view
     def style(self, i, line):
         th = self.th
+        if line.startswith('<!--'):
+            return [(0, len(line), th.c('dim', 'win'))]
         if line.startswith('#'):
             m = re.match(r'(#+)\s?', line)
             return [(0, m.end(), th.c('dim', 'win')), (m.end(), len(line), th.c('accent', 'win', 1))]
@@ -432,24 +794,23 @@ class Writer(App):
         m = re.match(r'(\s*)([-*+]|\d+[.)])\s', line)
         if m:
             out.append((m.start(2), m.end(2), th.c('accent', 'win')))
-        if line.startswith('>'):
+        if line.startswith('>') or line.lstrip().startswith('|'):
             out.append((0, len(line), th.c('dim', 'win')))
         for m in INLINE.finditer(line):
             if m.group(1):
                 out += [(m.start(), m.start() + 2, th.c('sel', 'win')),
                         (m.start() + 2, m.end() - 2, th.c('bright', 'win', 1)),
                         (m.end() - 2, m.end(), th.c('sel', 'win'))]
-            elif m.group(2):
-                out += [(m.start(), m.start() + 1, th.c('sel', 'win')),
-                        (m.start() + 1, m.end() - 1, th.c('accent2', 'win')),
-                        (m.end() - 1, m.end(), th.c('sel', 'win'))]
             elif m.group(3):
                 out.append((m.start(), m.end(), th.c('cyan', 'win')))
             elif m.group(4):
                 out.append((m.start(), m.end(), th.c('blue', 'win')))
         for m in TAG_RE.finditer(line):
             out.append((m.start(), m.end(), th.c('magenta', 'win')))
-        if writer_doc.IMAGE_RE.match(line):
+        m = richdoc.ALIGN_RE.search(line)
+        if m:
+            out.append((m.start(), m.end(), th.c('magenta', 'win')))
+        if writer_doc.IMAGE_RE.match(line) or richdoc.PAGEBREAK_RE.match(line):
             out.append((0, len(line), th.c('blue', 'win')))
         return out
 
@@ -469,10 +830,11 @@ class Writer(App):
             text = richdoc.serialize(self.doc)
             self.src_before = text
             self.ta.set_text(text)
-            self.ta.cy = min(self.cur[0], len(self.ta.lines) - 1)
+            self.ta.cy = min(self.cur[0] + (1 if self.doc.settings else 0), len(self.ta.lines) - 1)
             self.ta.cx = 0
             self.ta.modified = False
             self.source = True
+        self.form = None
         self.update_title()
         self.invalidate()
 
@@ -506,6 +868,17 @@ class Writer(App):
         except (OSError, zipfile.BadZipFile, ET.ParseError, KeyError) as e:
             self.wm.toast('Cannot open: %s' % e, 'red')
 
+    def new_from_template(self, name, replace=False):
+        fname, text = TEMPLATES[name]
+        text = text.replace('{date}', today())
+        if not replace and (self.modified or self.path):
+            self.wm.open('writer', template=name)
+            return
+        self.path = None
+        self.set_doc(richdoc.parse(text))
+        self.modified = False
+        self.update_title()
+
     def save(self, path=None, done=None):
         path = path or self.path
         if not path or path.lower().endswith('.odt'):
@@ -537,17 +910,37 @@ class Writer(App):
                           start=os.path.dirname(self.path) if self.path else None,
                           name=name, parent=self.win)
 
+    def open_file(self):
+        def ok(p):
+            if self.modified or self.path:
+                self.wm.open('writer', path=p)
+            else:
+                self.load(p)
+            self.update_title()
+        self.wm.pick_file(ok, 'open', parent=self.win)
+
     def export_txt(self):
         name = os.path.splitext(os.path.basename(self.path))[0] + '.txt' if self.path else 'document.txt'
 
         def ok(p):
             try:
                 with open(p, 'w', encoding='utf-8') as f:
-                    f.write(richdoc.export_text(self.doc))
+                    f.write(self.page_text())
                 self.wm.toast('Exported ' + os.path.basename(p), 'green')
             except OSError as e:
                 self.wm.toast(str(e), 'red')
         self.wm.pick_file(ok, 'save', name=name, parent=self.win)
+
+    def page_text(self):
+        """The document as it looks on paper, as plain text: pages split by form feeds."""
+        _pg, sheets = self.make_sheets(gfx=False)
+        out = []
+        for sh in sheets:
+            lines = [ch.rstrip() for ch, _a in sh.rows]
+            while lines and not lines[-1]:
+                lines.pop()
+            out.append('\n'.join(lines))
+        return '\n\f\n'.join(out) + '\n'
 
     def export_docx(self):
         name = os.path.splitext(os.path.basename(self.path))[0] + '.docx' if self.path else 'document.docx'
@@ -561,6 +954,7 @@ class Writer(App):
         self.wm.pick_file(ok, 'save', name=name, parent=self.win)
 
     def on_close(self):
+        self.leave_gfx()
         self.update_title()
         if not (self.modified or self.win.title.startswith('* ')):
             return True
@@ -574,64 +968,88 @@ class Writer(App):
                        res, parent=self.win)
         return False
 
-    def print_doc(self):
-        """The sheet as the printer sees it: one ink, characters only, page by page."""
-        text = self.doc_text()
-        cfg = self.wm.cfg
-        page_w = int(cfg.get('writer_page_w') or 80)
-        lines_pp = int(cfg.get('writer_page_lines') or 66)
-        mv = self.p_margin_v
-        rows_pp = max(4, lines_pp - 2 * mv)
-        margin = 5 if page_w >= 56 else 2
-        text_w = page_w - 2 - 2 * margin
-        bottom = self.th.c('text', 'win')
+    # ================================================================ printing
+    def print_layout(self):
+        """A fresh layout for paper: pictures loaded synchronously."""
+        doc = richdoc.parse(self.doc_text())
+        pg = doc.page()
+        lay = richdoc.Layout(self.wm, pg.text_w, self.base_dir, self.images, mono=True,
+                             page=pg.rows, bg_role='win', sync=True,
+                             settings=doc.settings).run(doc)
+        return doc, pg, lay
+
+    def make_sheets(self, pick=None, gfx=True):
+        doc, pg, lay = self.print_layout()
+        sheets = richdoc.sheets(lay, pg, self.doc_title(), today(), pick)
+        if not gfx:
+            for sh in sheets:
+                sh.gfx = []
+        return pg, sheets
+
+    def raster(self, pg):
+        # the printed page uses a fine font, whatever the screen shows: a 6x12
+        # console font would print as blocks
+        name = self.wm.cfg.get('print_font') or 'Lat15-Fixed16.psf.gz'
         try:
-            lay = richdoc.Layout(self.wm, text_w, self.base_dir, self.images, mono=True,
-                                 page=rows_pp, bg_role='win', sync=True).run(richdoc.parse(text))
-            pages = max(1, (lay.height + rows_pp - 1) // rows_pp)
-            out = []
-            for k in range(pages):
-                for j in range(mv):
-                    out.append(('', []))
-                for r in range(rows_pp):
-                    idx = k * rows_pp + r
-                    chars, attrs = lay.rows[idx] if idx < len(lay.rows) else ([], [])
-                    chars = ''.join(chars)
-                    line = (' ' * (margin + 1) + chars)[:page_w].ljust(page_w)
-                    a = [bottom] * page_w
-                    for j, at in enumerate(attrs[:len(chars)]):
-                        if margin + 1 + j < page_w:
-                            a[margin + 1 + j] = at
-                    out.append((line, a))
-                for j in range(mv):
-                    out.append(('', []))
-                label = 'Seite %d/%d' % (k + 1, pages)
-                out[k * lines_pp] = (label.rjust(page_w), [])
-            data = printer.encode(out, width=page_w, page_lines=lines_pp)
-        except Exception as e:
-            self.wm.toast('Print failed: %s' % e, 'red')
+            from .. import printraster
+            return printraster.Raster(pg, font_name=name)
+        except Exception as e:                   # noqa: BLE001 - PIL missing etc.
+            util_log('writer: no raster for bit images: %s' % e)
+            return None
+
+    def print_doc(self, pick=None, copies=1, quality=None, target=None, test=False):
+        cfg = self.wm.cfg
+        quality = quality or cfg.get('printer_quality', 'draft')
+        target = (cfg.get('printer_device') or '').strip() if target is None else target
+        pictures = cfg.get('printer_pictures', 'gfx')
+        if self.printing:
+            self.wm.toast('Still printing...', 'dim')
             return
-        target = (self.wm.cfg.get('printer_device') or '').strip()
-        if target:
-            try:
+
+        def work():
+            if test:
+                pg = self.doc.page()
+                sheets = [printer.test_sheet(pg)]
+            else:
+                pg, sheets = self.make_sheets(pick)
+            if pictures == 'text':
+                for sh in sheets:
+                    sh.gfx = []
+            ras = self.raster(pg) if any(sh.gfx for sh in sheets) else None
+            data = printer.encode_sheets(sheets, pg, quality, ras.dot_rows if ras else None,
+                                         copies)
+            if target:
                 printer.send(data, target)
-                self.wm.toast('Sent %d bytes to %s' % (len(data), target), 'green')
-            except Exception as e:
-                self.wm.toast('Print failed: %s' % e, 'red')
-            return
-        name = os.path.splitext(os.path.basename(self.path))[0] + '.prn' if self.path else 'document.prn'
+            return data, len(sheets)
 
-        def ok(path):
-            try:
-                with open(path, 'wb') as f:
-                    f.write(data)
-                self.wm.toast('Print file saved: %s (%d bytes)' % (os.path.basename(path), len(data)),
+        def done(res):
+            self.printing = False
+            data, n = res
+            if target:
+                self.wm.toast('Printed %d page%s (%d kB) on %s' % (n, '' if n == 1 else 's',
+                                                                   len(data) // 1024 + 1, target),
                               'green')
-            except OSError as e:
-                self.wm.toast(str(e), 'red')
+                return
+            name = os.path.splitext(os.path.basename(self.path))[0] + '.prn' if self.path \
+                else 'document.prn'
 
-        self.wm.pick_file(ok, 'save', name=name, parent=self.win, title='Save printer file')
+            def ok(path):
+                try:
+                    with open(path, 'wb') as f:
+                        f.write(data)
+                    self.wm.toast('Print file saved: %s (%d bytes)' % (os.path.basename(path),
+                                                                       len(data)), 'green')
+                except OSError as e:
+                    self.wm.toast(str(e), 'red')
+            self.wm.pick_file(ok, 'save', name=name, parent=self.win, title='Save printer file')
 
+        def fail(e):
+            self.printing = False
+            self.wm.toast('Print failed: %s' % e, 'red')
+
+        self.printing = True
+        self.wm.toast('Printing...', 'accent')
+        self.thread(work, done, fail)
     # ================================================================ selection
     def sel_range(self):
         if self.anchor is None or self.anchor == self.cur:
@@ -692,8 +1110,9 @@ class Writer(App):
         if p0 == p1:
             P0.set(P0.text[:i0] + P0.text[i1:], P0.st[:i0] + P0.st[i1:])
         else:
-            if P0.kind == 'rule':
+            if P0.kind in ('rule', 'pagebreak', 'tsep'):
                 P0.kind, P0.level, P0.indent, P0.marker = P1.kind, P1.level, P1.indent, P1.marker
+                P0.align = P1.align
             P0.set(P0.text[:i0] + P1.text[i1:], P0.st[:i0] + P1.st[i1:])
             gone = paras[p0 + 1:p1 + 1]
             for f in self.doc.floats:
@@ -716,9 +1135,14 @@ class Writer(App):
             return
         pi, i = self.cur = self._clamp(self.cur)
         p = self.doc.paras[pi]
-        if p.kind == 'rule':
+        if p.kind in ('rule', 'pagebreak'):
             p.kind = 'p'
+        elif p.kind == 'tsep':
+            self.wm.toast('This line is the header rule of the table', 'dim')
+            return
         style = style or self.style_here()
+        if p.kind == 'table':
+            style = style._replace(size=1, ul=0)
         if p.kind == 'code':
             style = richdoc.PLAIN
         p.set(p.text[:i] + text + p.text[i:], p.st[:i] + [style] * len(text) + p.st[i:])
@@ -742,8 +1166,8 @@ class Writer(App):
             m = re.match(r'(\d+)([.)])$', p.marker)
             if m:
                 q.marker = '%d%s' % (int(m.group(1)) + 1, m.group(2))
-        elif p.kind == 'rule':
-            q.kind = 'p'
+        elif p.kind in ('rule', 'pagebreak', 'tsep'):
+            q.kind, q.marker = 'p', '-'
         self.doc.paras.insert(pi + 1, q)
         self.cur = (pi + 1, 0)
         if before_style is not None and not q.text:
@@ -814,6 +1238,27 @@ class Writer(App):
             p.kind = 'p'
             p.touch()
             return
+        if p.kind == 'table' and not p.text.replace('|', '').strip():
+            p.kind = 'p'                          # an empty row ends the table
+            p.set('', [])
+            return
+        if p.kind == 'p' and p.text.startswith('|') and p.text.count('|') >= 2 \
+                and i == len(p.text):
+            q = richdoc.parse_table_line(richdoc.para_md(p))
+            p.kind, p.marker = q.kind, q.marker
+            p.set(q.text, q.st)
+            self.cur = (pi, len(p.text))
+            if p.kind == 'tsep':
+                self.doc.paras.insert(pi + 1, richdoc.Para(
+                    'table', '|' * (len(p.marker) - 1)))
+                self.cur = (pi + 1, 0)
+                return
+        if p.kind == 'table':
+            n = p.text.count('|')
+            q = richdoc.Para('table', '|' * n)
+            self.doc.paras.insert(pi + 1, q)
+            self.cur = (pi + 1, 0)
+            return
         self.split_para()
 
     def backspace(self):
@@ -828,14 +1273,20 @@ class Writer(App):
             self.delete_range((pi, i - 1), (pi, i))
             return
         self.snapshot()
-        if p.kind in ('li', 'quote', 'h', 'code', 'rule'):
-            p.kind, p.level = 'p', 0
+        if p.kind in ('li', 'quote', 'h', 'code', 'rule', 'pagebreak', 'tsep') or p.align:
+            if p.align and p.kind not in ('rule', 'pagebreak', 'tsep'):
+                p.align = ''
+            else:
+                p.kind, p.level = 'p', 0
             p.touch()
             return
         if pi == 0:
             return
         prev = self.doc.paras[pi - 1]
-        if prev.kind == 'rule':
+        if p.kind == 'table' and prev.kind in ('table', 'tsep'):
+            self.cur = (pi - 1, len(prev.text))   # rows are not merged: just move up
+            return
+        if prev.kind in ('rule', 'pagebreak', 'tsep'):
             for f in self.doc.floats:
                 if f.anchor is prev:
                     f.anchor = p
@@ -994,6 +1445,9 @@ class Writer(App):
 
     def indent(self, back=False):
         p = self.para()
+        if p.kind == 'table':
+            self.table_tab(back)
+            return
         if p.kind != 'li':
             if not back:
                 self.snapshot('type')
@@ -1090,6 +1544,12 @@ class Writer(App):
         elif k in ('-', 'ctrl+left'):
             self.snapshot('float')
             self.resize_float(f, w - 2)
+        elif k in ('g', 'G'):
+            self.snapshot()
+            f.out = 'text' if f.out == 'gfx' else 'gfx'
+            self.wm.toast('Printed as %s' % ('bit image (graphics)' if f.out == 'gfx'
+                                              else 'characters (as on screen)'), 'accent')
+            self.changed()
         elif k in ('w', 'W'):
             self.snapshot()
             self.fix_float(f)
@@ -1117,85 +1577,361 @@ class Writer(App):
         self.invalidate()
         return True
 
-    # ================================================================ drawing
+
+    # ================================================================ paragraph styles
+    def para_style(self, p=None):
+        p = p or self.para()
+        for n, (label, kind, lv) in enumerate(STYLES):
+            if p.kind != kind:
+                continue
+            if kind == 'h' and p.level != lv:
+                continue
+            if kind == 'li' and (lv == '1.') != bool(re.match(r'\d', p.marker or '')):
+                continue
+            return n
+        if p.kind == 'h':
+            return 3
+        return -1
+
+    def style_label(self, p=None):
+        p = p or self.para()
+        n = self.para_style(p)
+        if n >= 0:
+            return STYLES[n][0]
+        return {'table': 'Table', 'tsep': 'Table', 'pagebreak': 'Page break',
+                'rule': 'Line'}.get(p.kind, 'Text')
+
+    def set_style(self, n):
+        label, kind, lv = STYLES[n]
+        self.snapshot()
+        number = 1
+        for pi in self.para_range():
+            p = self.doc.paras[pi]
+            if p.kind in ('rule', 'pagebreak', 'tsep', 'table'):
+                continue
+            p.kind = kind
+            p.level = lv if kind == 'h' else 0
+            if kind == 'li':
+                p.marker = '%d.' % number if lv == '1.' else '-'
+                number += 1
+            if kind == 'code':
+                p.align = ''
+                p.set(p.text, [richdoc.PLAIN] * len(p.text))
+            p.touch()
+        self.after_edit()
+
+    def set_align(self, align):
+        self.snapshot()
+        for pi in self.para_range():
+            p = self.doc.paras[pi]
+            if p.kind in ('rule', 'pagebreak', 'tsep', 'table', 'code'):
+                continue
+            p.align = align
+            p.touch()
+        self.after_edit()
+
+    def cycle_align(self):
+        order = [a for a, _l, _s in ALIGN_NAMES]
+        cur = self.para().align or ''
+        self.set_align(order[(order.index(cur) + 1) % len(order)] if cur in order else '')
+        label = dict((a, l) for a, l, _s in ALIGN_NAMES)[self.para().align or '']
+        self.wm.toast('Align: %s' % label, 'accent')
+
+    # ================================================================ tables
+    def cell_bounds(self, pi, i):
+        t = self.doc.paras[pi].text
+        a = t.rfind('|', 0, i) + 1
+        b = t.find('|', i)
+        return a, (len(t) if b < 0 else b)
+
+    def table_tab(self, back=False):
+        pi, i = self.cur
+        p = self.doc.paras[pi]
+        a, b = self.cell_bounds(pi, i)
+        if not back:
+            if b < len(p.text):
+                self.cur = (pi, b + 1)
+            else:
+                nxt = pi + 1
+                while nxt < len(self.doc.paras) and self.doc.paras[nxt].kind == 'tsep':
+                    nxt += 1
+                if nxt < len(self.doc.paras) and self.doc.paras[nxt].kind == 'table':
+                    self.cur = (nxt, 0)
+                else:                              # last cell: a new row
+                    self.snapshot()
+                    q = richdoc.Para('table', '|' * p.text.count('|'))
+                    self.doc.paras.insert(pi + 1, q)
+                    self.cur = (pi + 1, 0)
+        else:
+            if a > 0:
+                a2, _b2 = self.cell_bounds(pi, a - 1)
+                self.cur = (pi, a2)
+            else:
+                prv = pi - 1
+                while prv >= 0 and self.doc.paras[prv].kind == 'tsep':
+                    prv -= 1
+                if prv >= 0 and self.doc.paras[prv].kind == 'table':
+                    t = self.doc.paras[prv].text
+                    self.cur = (prv, t.rfind('|') + 1)
+        # select the cell, like spreadsheets do
+        pi, i = self.cur
+        a, b = self.cell_bounds(pi, i)
+        self.anchor = (pi, a) if b > a else None
+        self.cur = (pi, b)
+        self.after_edit()
+
+    def insert_table(self, spec=None):
+        if spec is None:
+            self.wm.prompt('Insert table', 'Columns x rows (header row included):', '3x4',
+                           lambda v: self.insert_table(v or '3x4'), parent=self.win)
+            return
+        m = re.match(r'\s*(\d+)\s*[x*, ]\s*(\d+)', spec or '')
+        cols, nrows = (int(m.group(1)), int(m.group(2))) if m else (3, 4)
+        cols, nrows = max(1, min(12, cols)), max(1, min(60, nrows))
+        self.snapshot()
+        pi = self.cur[0]
+        head = '|'.join('Spalte %d' % (c + 1) for c in range(cols))
+        new = [richdoc.Para('table', head), richdoc.Para('tsep', marker='l' * cols)]
+        new += [richdoc.Para('table', '|' * (cols - 1)) for _ in range(max(0, nrows - 1))]
+        p = self.doc.paras[pi]
+        at = pi + 1
+        if not p.text and p.kind == 'p':
+            self.doc.paras[pi:pi + 1] = new
+            at = pi
+        else:
+            self.doc.paras[at:at] = new
+        self.doc.paras.insert(at + len(new), richdoc.Para())
+        self.cur = (at, 0)
+        self.anchor = (at, 0)
+        self.cur = (at, len('Spalte 1'))
+        self.after_edit()
+
+    def insert_block(self, kind):
+        """A page break or a horizontal line after the cursor's paragraph."""
+        self.snapshot()
+        pi, i = self.cur
+        p = self.doc.paras[pi]
+        if i > 0 and i < len(p.text):
+            self.split_para()
+            pi = self.cur[0] - 1
+        elif i == 0 and p.text:
+            pi -= 1
+        self.doc.paras.insert(pi + 1, richdoc.Para(kind))
+        if pi + 2 >= len(self.doc.paras):
+            self.doc.paras.append(richdoc.Para())
+        self.cur = (pi + 2, 0)
+        self.anchor = None
+        self.after_edit()
+
+    def insert_date(self):
+        self.snapshot('type')
+        self.delete_sel()
+        self.insert_chars(today())
+        self.after_edit()
+
+    # ================================================================ geometry
     def outline(self):
         return [(i, p) for i, p in enumerate(self.doc.paras) if p.kind == 'h']
 
     def frame(self, w):
-        """Sheet geometry: a printer page, text area inside its margins."""
-        side = 24 if w >= 110 and not self.focus_mode else 0
+        """Sheet geometry: border + page columns; scrolls sideways when too wide."""
+        pg = self.pg
+        sw = pg.cols + 2
+        want_side = self.show_outline and not self.focus_mode
+        side = 24 if want_side and w - 1 - 24 >= sw else 0
         avail = w - side - 1                      # one column for the scrollbar
-        cfg = self.wm.cfg
-        lines = int(cfg.get('writer_page_lines') or 66)
-        self.rows_per_page = max(4, lines - 2 * self.p_margin_v)
-        self.block = 2 * self.p_margin_v + self.rows_per_page + 3
-        page_w = int(cfg.get('writer_page_w') or 80)
-        page_w = max(24, min(page_w, avail - 2))
-        margin = 5 if page_w >= 56 else 2
-        text_w = page_w - 2 - 2 * margin
-        if text_w < 12:                           # very narrow window
-            margin = 1
-            text_w = max(8, page_w - 2 - 2 * margin)
-        self.page_w, self.p_margin = page_w, margin
-        self.page_x = side + max(1, (avail - page_w) // 2)
-        self.text_x = self.page_x + 1 + margin
-        return side, self.page_x, text_w, avail
+        self.side, self.avail = side, avail
+        self.block = pg.lines + 3
+        if avail >= sw:
+            self.hx = 0
+            self.page_x = side + (avail - sw) // 2
+        else:
+            self.hx = max(0, min(self.hx, sw - avail))
+            self.page_x = side - self.hx
+        self.text_x = self.page_x + 1 + pg.left
+        return side, self.page_x, pg.text_w, avail
 
     # --- page geometry: layout row <-> screen row -------------------------
     def y_scr(self, gy):
-        rows = self.rows_per_page
+        rows = self.pg.rows
         k, local = divmod(max(0, gy), rows)
-        return k * self.block + 1 + self.p_margin_v + local
+        return k * self.block + 1 + self.pg.top + local
 
     def y_doc(self, sy):
-        rows = self.rows_per_page
+        rows = self.pg.rows
         k, local = divmod(max(0, sy), self.block)
-        top = 1 + self.p_margin_v
+        top = 1 + self.pg.top
         if local < top:
             return k * rows
         if local < top + rows:
             return k * rows + local - top
         return (k + 1) * rows - 1
 
-    def toolbar(self, cv, w):
-        sty = self.style_chars() or [self.style_here()] if not self.source else []
-        s0 = sty[0] if sty else richdoc.PLAIN
-        p = self.para() if not self.source else None
-        rows = [
-            [('New', 'new', False), ('Open', 'open', False), ('Save', 'save', False),
-             ('DOCX', 'docx', False), ('TXT', 'txt', False), ('Print', 'print', False), None,
-             ('Img', 'image', False), ('Source' if not self.source else 'Page', 'source', self.source),
-             ('Focus', 'focus', self.focus_mode)],
-            [('B', 'bold', s0.bold), ('U1', 'underline', s0.ul == 1),
-             ('U2', 'underline2', s0.ul >= 2), ('S1', 'size1', s0.size == 1),
-             ('S2', 'size2', s0.size == 2),
-             ('S3', 'size3', s0.size == 3), None,
-             ('H', 'head', bool(p and p.kind == 'h')), ('List', 'list', bool(p and p.kind == 'li'))],
-        ]
-        if self.sel_float is not None and not self.source:
+    # ================================================================ drawing: bars
+    def menu_bar(self, cv, w):
+        th = self.th
+        cv.fill(0, 0, w, 1, th.c('text', 'raised'))
+        x = 1
+        self.menu_x = []
+        open_i = self.open_menu_index()
+        for i, (label, _k) in enumerate(MENUS):
+            self.menu_x.append(x)
+            on = open_i == i or self.hover == ('menu', i)
+            a = th.c('on_accent', 'accent') if on else th.c('text', 'raised')
+            cv.put(x, 0, ' %s ' % label, a)
+            cv.put(x + 1, 0, label[0], th.c('on_accent', 'accent', 1) if on
+                   else th.c('accent', 'raised', 1))
+            self.zone(x, 0, len(label) + 2, 1, ('menu', i))
+            x += len(label) + 3
+        info = '%s  F10 menu' % self.pg.describe()
+        if x + len(info) + 2 < w:
+            cv.put(w - len(info) - 1, 0, info, th.c('dim', 'raised'))
+
+    def open_menu_index(self):
+        for p in getattr(self.wm, 'popups', ()):
+            if isinstance(p, BarMenu) and p.owner is self:
+                return p.index
+        return None
+
+    def format_bar(self, cv, w):
+        th = self.th
+        y = 1
+        x = 0
+        if self.source:
+            cv.put(1, y, fit('Markdown source - F5 returns to the page. Settings line: '
+                             '<!-- writer: ... -->', w - 2), th.c('dim', 'win'))
+            return
+        if self.sel_float is not None:
             f = self.sel_float
-            rows[1] += [None, ('Wrap:%s' % ('around' if f.wrap == 'square' else 'block'), 'fwrap', False),
-                        ('-', 'fsmall', False), ('+', 'fbig', False), ('Del', 'fdel', False)]
-        for row, items in enumerate(rows):
-            x = 0
-            for it in items:
-                if it is None:
-                    x += 1
-                    continue
-                label, key, active = it
+            fr = self.float_rect(f) or (0, 0, 0, 0)
+            cv.put(x, y, fit('Picture %s %dx%d' % (os.path.basename(f.path), fr[2], fr[3]), 30),
+                   th.c('accent', 'win', 1))
+            x = 31
+            for label, k, act in (('Wrap: ' + ('around' if f.wrap == 'square' else 'block'),
+                                   'fwrap', False),
+                                  ('Print: ' + ('graphics' if f.out == 'gfx' else 'ASCII'),
+                                   'fout', f.out == 'gfx'),
+                                  ('-', 'fsmall', False), ('+', 'fbig', False),
+                                  ('Delete', 'fdel', False)):
                 if x + len(label) + 3 > w:
                     break
-                x += button(self, cv, x, row, label, key, active=active) + 1
+                x += button(self, cv, x, y, label, k, active=act) + 1
+            return
+        sty = self.style_chars() or [self.style_here()]
+        s0 = sty[0] if sty else richdoc.PLAIN
+        p = self.para()
+        label = '%-13s v' % fit(self.style_label(p), 13)
+        self._style_x = x
+        x += button(self, cv, x, y, label, 'stylemenu') + 1
+        x += 1
+        for lab, k, act in (('B', 'bold', s0.bold), ('U', 'underline', s0.ul == 1),
+                            ('U2', 'underline2', s0.ul >= 2)):
+            x += button(self, cv, x, y, lab, k, active=act) + 1
+        size = dict(SIZES).get(s0.size, 'Normal')
+        x += 1
+        self._size_x = x
+        x += button(self, cv, x, y, '%-6s v' % size, 'sizemenu') + 2
+        for a, _lab, short in ALIGN_NAMES:
+            if x + 4 > w:
+                break
+            x += button(self, cv, x, y, short, ('align', a), active=(p.align or '') == a) + 1
+        x += 1
+        for lab, k in (('Table', 'table'), ('Img', 'image'), ('Fonts', 'fonts')):
+            if x + len(lab) + 3 > w:
+                break
+            x += button(self, cv, x, y, lab, k) + 1
 
+    def ruler(self, cv, y, w):
+        """Columns of the text area: '[' and ']' at the margins, numbers every ten."""
+        th = self.th
+        pg = self.pg
+        a = th.c('dim', 'win')
+        caret_x = None
+        if not self.source and self.lay is not None:
+            caret_x = self.lay.caret(*self.cur)[0]
+        for c in range(pg.cols):
+            sx = self.page_x + 1 + c
+            if not (self.side <= sx < w - 1):
+                continue
+            rel = c - pg.left
+            if rel == -1:
+                ch = '['
+            elif rel == pg.text_w:
+                ch = ']'
+            elif 0 <= rel < pg.text_w:
+                ch = str(rel // 10 % 10) if rel % 10 == 0 and rel else ('+' if rel % 5 == 0 else '.')
+            else:
+                ch = ' '
+            at = a
+            if caret_x is not None and rel == caret_x:
+                at = th.c('on_accent', 'accent')
+            cv.put(sx, y, ch, at)
+
+    def status_line(self, cv, w, h, lay):
+        th = self.th
+        if self.sel_float is not None and not self.source:
+            f = self.sel_float
+            st = 'drag: move  # corner: size  arrows  +/-  W wrap  G print as %s  Del' % (
+                'ASCII' if f.out == 'gfx' else 'graphics')
+            cv.put(0, h - 1, fit(st, w), th.c('accent', 'win'))
+            return
+        if self.source:
+            st = 'source  F5 back to the page'
+        else:
+            if getattr(self, '_count', (None,))[0] != self.ver:
+                text = richdoc.plain(self.doc)
+                self._count = (self.ver, len(re.findall(r'\w+', text)), len(text))
+            cx, cy, _ch = lay.caret(*self.cur)
+            page_no = cy // self.pg.rows + 1
+            st = 'page %d/%d  line %d  col %d  %d words' % (
+                page_no, self.pages, cy % self.pg.rows + 1, cx + 1, self._count[1])
+            sw = self.pg.cols + 2
+            if self.avail < sw:                 # the sheet is wider than the window
+                st = 'cols %d-%d/%d  ' % (self.hx + 1, self.hx + self.avail, sw) + st
+        left = shorten_path(self.path, 40) if self.path else 'not saved'
+        cv.put(0, h - 1, fit(left, max(0, w - len(st) - 2)), th.c('dim', 'win'))
+        cv.put(max(0, w - len(st)), h - 1, st[-w:], th.c('dim', 'win'))
+
+    def find_bar(self, cv, y, w):
+        th = self.th
+        f = self.find
+        cv.fill(0, y, w, 1, th.c('text', 'raised'))
+        x = 1
+        cv.put(x, y, 'Find', th.c('accent' if f['focus'] == 'q' else 'text', 'raised', 1))
+        x += 5
+        fw = max(8, min(24, (w - 50) // 2))
+        f['q'].draw(cv, x, y, fw, th, f['focus'] == 'q')
+        self.zone(x, y, fw, 1, ('findfield', 'q', x))
+        x += fw + 2
+        cv.put(x, y, 'Replace', th.c('accent' if f['focus'] == 'r' else 'text', 'raised', 1))
+        x += 8
+        f['r'].draw(cv, x, y, fw, th, f['focus'] == 'r')
+        self.zone(x, y, fw, 1, ('findfield', 'r', x))
+        x += fw + 2
+        for lab, k in (('Next', 'fnext'), ('Replace', 'frepl'), ('All', 'fall'), ('x', 'fclose')):
+            if x + len(lab) + 2 > w:
+                break
+            x += button(self, cv, x, y, lab, k) + 1
+        if f.get('note') and x + len(f['note']) + 1 < w:
+            cv.put(x + 1, y, f['note'], th.c('dim', 'raised'))
+
+    # ================================================================ drawing: page
     def draw(self, cv, focused):
         th = self.th
         w, h = cv.w, cv.h
+        lay = self.layout() if not self.source else self.lay
         top = 0
         if not self.focus_mode:
-            self.toolbar(cv, w)
-            top = 3
+            self.menu_bar(cv, w)
+            self.format_bar(cv, w)
+            top = 2
         side, page_x, colw, avail = self.frame(w)
-        self.colw = colw
+        if not self.focus_mode and self.show_ruler and not self.source:
+            self.ruler(cv, 2, w)
+            top = 3
+        elif not self.focus_mode:
+            top = 3
+        bottom = 1 + (1 if self.find else 0)
         if side:
             cv.put(0, top, 'OUTLINE', th.c('dim', 'win'))
             for j, (i, p) in enumerate(self.outline()[:h - top - 3]):
@@ -1205,30 +1941,36 @@ class Writer(App):
                 cv.put(0, top + 1 + j, fit('  ' * (p.level - 1) + p.text.strip(), side - 2), a)
                 self.zone(0, top + 1 + j, side - 2, 1, ('ol', i))
         self.text_y = top
-        view_h = max(1, h - top - 1)
+        view_h = max(1, h - top - bottom)
         self.view_h = view_h
+        if self.find:
+            self.find_bar(cv, h - 2, w)
         if self.source:
-            self.ta.draw(cv, self.text_x, top, colw, view_h, th, focused)
-            st = 'source  F5 back to the page'
-            cv.put(0, h - 1, fit(shorten_path(self.path, 40) if self.path else 'not saved',
-                                 w - len(st) - 2), th.c('dim', 'win'))
-            cv.put(w - len(st), h - 1, st, th.c('dim', 'win'))
+            tx = max(side, (w - side - 82) // 2 + side)
+            self.ta.draw(cv, tx, top, min(82, w - tx - 1), view_h, th, focused)
+            self.text_x = tx
+            self.status_line(cv, w, h, lay)
             self.zone(side, top, avail, view_h, 'text')
             return
-        lay = self.layout(colw)
-        rows = self.rows_per_page
+        rows = self.pg.rows
         self.pages = max(1, (lay.height + rows - 1) // rows)
         total = self.pages * self.block
         self.top = max(0, min(self.top, max(0, total - view_h)))
         paper = th.c('text', 'win_on')
+        sw = self.pg.cols + 2
+        x0 = max(page_x, side)
+        clip = x0 - page_x
+        self.header_cache = {}
         for i in range(view_h):
             sy = self.top + i
             k, local = divmod(sy, self.block)
             if k >= self.pages:
                 break
             chars, attrs = self.page_line(lay, k, local, self.pages, paper)
-            cv.blit_cells(page_x, top + i, [(chars, attrs)])
-        self.zone(page_x, top, self.page_w, view_h, 'text')
+            n = min(sw - clip, w - 1 - x0)
+            if n > 0:
+                cv.blit_cells(x0, top + i, [(chars[clip:clip + n], attrs[clip:clip + n])])
+        self.zone(x0, top, min(sw, w - 1 - x0), view_h, 'text')
         # selection (paper keeps its background, only the ink turns bright)
         r = self.sel_range()
         if r:
@@ -1239,26 +1981,29 @@ class Writer(App):
                 pt = lay.tops[pi]
                 a = i0 if pi == p0 else 0
                 b = i1 if pi == p1 else len(pl.boxes)
-                for k in range(a, b):
-                    bx0, bx1, by, bh = pl.boxes[k]
+                for kk in range(a, b):
+                    bx0, bx1, by, bh = pl.boxes[kk]
                     sy = self.y_scr(pt + by)
                     if sy + bh < self.top or sy > self.top + view_h:
                         continue
-                    cv.recolor(self.text_x + bx0, top + sy - self.top, max(1, bx1 - bx0), bh,
-                               lambda at, s=sel_a: s)
+                    self.recolor_clip(cv, self.text_x + bx0, top + sy - self.top, max(1, bx1 - bx0),
+                                      bh, sel_a, top, view_h, w)
                 if pi < p1:
                     ex, ey, eh = pl.end
-                    cv.set_attr(self.text_x + ex, top + self.y_scr(pt + ey) - self.top, 1, 1, sel_a)
+                    self.recolor_clip(cv, self.text_x + ex, top + self.y_scr(pt + ey) - self.top,
+                                      1, 1, sel_a, top, view_h, w)
         # cursor
-        if focused and self.sel_float is None:
+        if focused and self.sel_float is None and not self.form and \
+                not (self.find and self.find['focus']):
             cx, cy, ch = lay.caret(*self.cur)
             cx = min(cx, colw - 1)
             ca = th.c('on_accent', 'accent')
             for yy in range(cy, cy + ch):
                 ry = self.y_scr(yy) - self.top
-                if 0 <= ry < view_h:
+                sx = self.text_x + cx
+                if 0 <= ry < view_h and side <= sx < w - 1:
                     c = lay.rows[yy][0][cx] if yy < len(lay.rows) else ' '
-                    cv.put(self.text_x + cx, top + ry, c, ca)
+                    cv.put(sx, top + ry, c, ca)
         # selected picture: frame + resize handle
         if self.sel_float is not None:
             fr = self.float_rect(self.sel_float)
@@ -1280,38 +2025,39 @@ class Writer(App):
                 if top <= Y + fh + 1 < top + view_h:
                     cv.putc(X + fw + 1, Y + fh + 1, '#', th.c('on_accent', 'accent'))
         # scrollbar
-        gx = min(w - 1, page_x + self.page_w + 1)
+        gx = w - 1
         self.sb = sb_geom(gx, top, view_h, total, view_h, self.top)
         sb_draw(cv, self.sb, th, 'win', active=self.sb_grab is not None)
         if self.sb:
             self.zone(gx, top, 1, view_h, 'sbar')
-        # status line
-        if self.sel_float is not None:
-            f = self.sel_float
-            fr = self.float_rect(f) or (0, 0, 0, 0)
-            st = '%s  %dx%d at %d  drag: move  # corner: size  arrows  +/-  W wrap  Del' % (
-                os.path.basename(f.path), fr[2], fr[3], fr[0])
-            cv.put(0, h - 1, fit(st, w), th.c('accent', 'win'))
-        else:
-            if getattr(self, '_count', (None,))[0] != self.ver:
-                text = richdoc.plain(self.doc)
-                self._count = (self.ver, len(re.findall(r'\w+', text)), len(text))
-            page_no = self.y_scr(lay.caret(*self.cur)[1]) // self.block + 1
-            st = '%d words  page %d/%d  F5 source' % (self._count[1], page_no, self.pages)
-            cv.put(0, h - 1, fit(shorten_path(self.path, 40) if self.path else 'not saved',
-                                 w - len(st) - 2), th.c('dim', 'win'))
-            cv.put(w - len(st), h - 1, st, th.c('dim', 'win'))
+        self.status_line(cv, w, h, lay)
+        if self.form:
+            self.form.draw(self, cv, side, top, w - side - 1, view_h)
+
+    def recolor_clip(self, cv, x, y, w, h, a, top, view_h, cw):
+        x0, x1 = max(x, self.side), min(x + w, cw - 1)
+        y0, y1 = max(y, top), min(y + h, top + view_h)
+        if x1 > x0 and y1 > y0:
+            cv.recolor(x0, y0, x1 - x0, y1 - y0, lambda at, s=a: s)
+
+    def margin_text(self, k, pages):
+        hit = self.header_cache.get(k) if hasattr(self, 'header_cache') else None
+        if hit is None:
+            title = self.doc_title()
+            hit = (self.pg.margin_line('header', k + 1, pages, title, today()),
+                   self.pg.margin_line('footer', k + 1, pages, title, today()))
+            self.header_cache[k] = hit
+        return hit
 
     def page_line(self, lay, k, local, pages, paper):
-        """One screen row of sheet k: border, margin, text or gap between sheets."""
+        """One screen row of sheet k: border, margins, header/footer, text, gap."""
         th = self.th
-        W = self.page_w
+        pg = self.pg
+        W = pg.cols + 2
         edge = th.c('dim', 'win_on')
         chars = [' '] * W
         attrs = [paper] * W
-        mv, rows = self.p_margin_v, self.rows_per_page
-        bottom_border = 1 + mv + rows + mv
-        if local == 0 or local == bottom_border:
+        if local == 0 or local == pg.lines + 1:
             chars[0] = chars[W - 1] = '+'
             for x in range(1, W - 1):
                 chars[x] = '-'
@@ -1326,33 +2072,641 @@ class Writer(App):
             return chars, [win] * W
         else:
             chars[0] = chars[W - 1] = '|'
-            if mv < local <= mv + rows:
-                gy = k * rows + (local - 1 - mv)
+            pr = local - 1
+            x = 1 + pg.left
+            if pg.top <= pr < pg.top + pg.rows:
+                gy = k * pg.rows + (pr - pg.top)
                 if gy < len(lay.rows):
                     text, tat = lay.rows[gy]
-                    x = 1 + self.p_margin
-                    n = max(0, min(len(text), W - 2 - 2 * self.p_margin))
+                    n = max(0, min(len(text), pg.text_w))
                     chars[x:x + n] = list(text[:n])
                     attrs[x:x + n] = tat[:n]
-        for x in range(W):
-            if chars[x] in '+|':
+            else:
+                head, foot = self.margin_text(k, pages)
+                t = None
+                if pr == max(0, pg.top - 2) and pg.top >= 1:
+                    t = head
+                elif pr == min(pg.lines - 1, pg.lines - pg.bottom + 1) and pg.bottom >= 1:
+                    t = foot
+                if t:
+                    da = th.c('dim', 'win_on')
+                    for j, c in enumerate(t[:pg.text_w]):
+                        if c != ' ':
+                            chars[x + j] = c
+                            attrs[x + j] = da
+        for x in (0, W - 1):
+            attrs[x] = edge
+        if chars[0] == '+':
+            for x in range(W):
                 attrs[x] = edge
         return chars, attrs
 
     def ensure_visible(self):
         lay = self.layout()
-        _x, y, h = lay.caret(*self.cur)
+        cx, y, h = lay.caret(*self.cur)
         s0, s1 = self.y_scr(y), self.y_scr(y + max(0, h - 1))
         if s0 < self.top:
             self.top = s0
         elif s1 >= self.top + self.view_h:
             self.top = s1 - self.view_h + 1
+        sw = self.pg.cols + 2
+        if self.avail < sw:                       # sideways: keep the caret on screen
+            col = 1 + self.pg.left + cx            # column on the sheet
+            if col - self.hx < 2:
+                self.hx = max(0, col - 4)
+            elif col - self.hx > self.avail - 3:
+                self.hx = min(sw - self.avail, col - self.avail + 6)
 
     def after_edit(self, visible=True):
         self.changed()
         if visible:
             self.ensure_visible()
         self.update_title()
+
+    # ================================================================ menus
+    def abs_xy(self, x, y):
+        b = 0 if getattr(self.win, 'borderless', False) else 1
+        return getattr(self.win, 'x', 0) + b + x, getattr(self.win, 'y', 0) + b + y
+
+    def open_menu(self, i):
+        i %= len(MENUS)
+        if self.focus_mode:
+            self.focus_mode = False
+            self.invalidate()
+        if self.source and MENUS[i][0] == 'Format':
+            pass
+        items = getattr(self, 'menu_' + MENUS[i][0].lower())()
+        x = self.menu_x[i] if i < len(self.menu_x) else 1 + i * 8
+        ax, ay = self.abs_xy(x, 1)
+        if hasattr(self.wm, 'popup'):
+            self.wm.close_popup()
+            self.wm.popup(BarMenu(self.wm, items, ax, ay, self, i))
+        self.invalidate()
+
+    def menu_file(self):
+        M = MenuItem
+        return [M('New', lambda: self.wm.open('writer'), 'Ctrl+N'),
+                M('New letter', lambda: self.new_from_template('letter')),
+                M('New flyer', lambda: self.new_from_template('flyer')),
+                M('New notes', lambda: self.new_from_template('notes')),
+                None,
+                M('Open...', self.open_file, 'Ctrl+O'),
+                M('Save', self.save, 'Ctrl+S'),
+                M('Save as...', self.save_as),
+                M('Export text (.txt)', self.export_txt, 'as printed'),
+                M('Export Word (.docx)', self.export_docx),
+                None,
+                M('Page setup...', self.page_form),
+                M('Print preview', self.enter_gfx, 'F6'),
+                M('Print...', self.print_form, 'Ctrl+P'),
+                None,
+                M('Close', lambda: self.wm.close(self.win))]
+
+    def menu_edit(self):
+        M = MenuItem
+        sel = bool(self.sel_range())
+        return [M('Undo', self.undo, 'Ctrl+Z', enabled=bool(self.undo_stack)),
+                M('Redo', self.redo, 'Ctrl+Y', enabled=bool(self.redo_stack)),
+                None,
+                M('Cut', lambda: self.on_key(Key('ctrl+x')), 'Ctrl+X', enabled=sel),
+                M('Copy', self.copy_sel, 'Ctrl+C', enabled=sel),
+                M('Paste', lambda: self.on_key(Key('ctrl+v')), 'Ctrl+V',
+                  enabled=bool(self.wm.clipboard)),
+                M('Select all', lambda: self.on_key(Key('ctrl+a')), 'Ctrl+A'),
+                None,
+                M('Find...', lambda: self.open_find('q'), 'Ctrl+F'),
+                M('Replace...', lambda: self.open_find('r')),
+                M('Find next', self.find_next, 'F3'),
+                None,
+                M('Markdown source', self.toggle_source, 'F5', checked=self.source)]
+
+    def menu_format(self):
+        M = MenuItem
+        s0 = (self.style_chars() or [self.style_here()])[0]
+        p = self.para()
+        cur = self.para_style(p)
+        items = [M('Bold', lambda: self.toggle('bold'), 'Ctrl+B', checked=s0.bold),
+                 M('Underline', lambda: self.cycle_ul(1), 'Ctrl+U', checked=s0.ul == 1),
+                 M('Double underline', lambda: self.cycle_ul(2), 'Alt+U', checked=s0.ul >= 2),
+                 None]
+        for size, label in SIZES:
+            items.append(M('Size: %s' % label, lambda s=size: self.cycle_size(s),
+                           'Ctrl+G' if size == 1 else '', checked=s0.size == size))
+        items.append(None)
+        for n, (label, _k, _l) in enumerate(STYLES):
+            items.append(M(label, lambda n=n: self.set_style(n), checked=cur == n))
+        items.append(None)
+        for a, label, _s in ALIGN_NAMES:
+            items.append(M('Align %s' % label.lower(), lambda a=a: self.set_align(a),
+                           'Ctrl+E' if not a else '', checked=(p.align or '') == a))
+        items += [None, M('Fonts...', self.fonts_form)]
+        return items
+
+    def menu_insert(self):
+        M = MenuItem
+        return [M('Picture...', self.insert_image),
+                M('Table...', lambda: self.insert_table()),
+                M('Page break', lambda: self.insert_block('pagebreak'), 'Ctrl+Enter'),
+                M('Horizontal line', lambda: self.insert_block('rule')),
+                M("Today's date", self.insert_date)]
+
+    def menu_view(self):
+        M = MenuItem
+
+        def flip(attr):
+            setattr(self, attr, not getattr(self, attr))
+            self.invalidate()
+        return [M('Outline', lambda: flip('show_outline'), checked=self.show_outline),
+                M('Ruler', lambda: flip('show_ruler'), checked=self.show_ruler),
+                M('Focus mode', self.toggle_focus, 'Ctrl+T', checked=self.focus_mode),
+                None,
+                M('Print preview (graphics)', self.enter_gfx, 'F6'),
+                M('Markdown source', self.toggle_source, 'F5', checked=self.source)]
+
+    def popup_at(self, items, x, y):
+        ax, ay = self.abs_xy(x, y)
+        self.wm.menu(items, ax, ay)
+
+    def style_menu(self):
+        cur = self.para_style()
+        items = [MenuItem(label, lambda n=n: self.set_style(n), checked=cur == n)
+                 for n, (label, _k, _l) in enumerate(STYLES)]
+        self.popup_at(items, getattr(self, '_style_x', 0), 2)
+
+    def size_menu(self):
+        s0 = (self.style_chars() or [self.style_here()])[0]
+        items = []
+        for size, label in SIZES:
+            name = richdoc.setting(self.doc.settings, 'font%d' % size, self.wm.cfg) \
+                if size > 1 else ''
+            hint = figlet.label(name) if name else 'printer text'
+            items.append(MenuItem(label, lambda s=size: self.cycle_size(s), hint,
+                                  checked=s0.size == size))
+        items += [None, MenuItem('Fonts...', self.fonts_form)]
+        self.popup_at(items, getattr(self, '_size_x', 22), 2)
+
+    # ================================================================ forms
+    def close_form(self, *_a):
+        self.form = None
+        self.invalidate()
+
+    def fonts_form(self):
+        names = figlet.available()
+        labels = [figlet.label(n) for n in names]
+        cfg = self.wm.cfg
+        cur2 = richdoc.setting(self.doc.settings, 'font2', cfg)
+        cur3 = richdoc.setting(self.doc.settings, 'font3', cfg)
+        sample = self.doc_title()[:24] or 'Ueberschrift'
+
+        def preview(cv, x, y, w, h):
+            th = self.th
+            yy = y
+            for key, what in (('font3', 'Huge'), ('font2', 'Large')):
+                name = form.get(key)
+                font = figlet.load(name)
+                rows, _sp = font.compose(sample)
+                width = len(rows[0]) if rows else 0
+                per = max(1, int(round(len(sample) * self.pg.text_w / float(max(1, width)))))
+                cv.put(x, yy, fit('%s: %s - %d rows, about %d letters per line' % (
+                    what, figlet.label(name), font.height, per), w), th.c('dim', 'raised'))
+                yy += 1
+                for r in rows:
+                    if yy >= y + h:
+                        return
+                    cv.put(x, yy, fit(r.rstrip(), w), th.c('bright', 'raised'))
+                    yy += 1
+                yy += 1
+
+        def done(b):
+            if b == 'OK':
+                self.snapshot()
+                self.doc.settings['font2'] = form.get('font2')
+                self.doc.settings['font3'] = form.get('font3')
+                self.lay = None
+                self.after_edit()
+            elif b == 'Default for new':
+                cfg['writer_font2'] = form.get('font2')
+                cfg['writer_font3'] = form.get('font3')
+                try:
+                    cfg.save()
+                except Exception:              # noqa: BLE001
+                    pass
+                self.wm.toast('New documents use %s / %s' % (
+                    figlet.label(form.get('font2')), figlet.label(form.get('font3'))), 'green')
+                return
+            self.close_form()
+
+        rows = [
+            {'key': 'font2', 'label': 'Large  (S2, Heading 2)', 'kind': 'choice',
+             'values': names, 'labels': labels, 'value': cur2 if cur2 in names else names[0]},
+            {'key': 'font3', 'label': 'Huge   (S3, Heading 1)', 'kind': 'choice',
+             'values': names, 'labels': labels, 'value': cur3 if cur3 in names else names[0]},
+            {'label': 'The fonts belong to this document (saved with it).', 'kind': 'info'},
+        ]
+        form = Form('fonts', 'Fonts of this document', rows, ['OK', 'Default for new', 'Cancel'],
+                    done, extra=preview, extra_h=26, width=max(60, min(110, self.pg.text_w + 6)))
+        self.form = form
+        self.invalidate()
+
+    def page_form(self):
+        s = dict(self.doc.settings)
+        pg = self.doc.page()
+        margin_vals = [''] + [str(v) for v in range(0, 21)]
+        margin_lbl = ['auto'] + [str(v) for v in range(0, 21)]
+
+        def refresh(_v=None):
+            p = richdoc.Page(collect())
+            info['label'] = 'Text area %d x %d characters on %s (%d x %d)' % (
+                p.text_w, p.rows, p.paper_label, p.cols, p.lines)
+            self.invalidate()
+
+        def collect():
+            out = dict(s)
+            for key in ('paper', 'cpi', 'lpi', 'left', 'right', 'top', 'bottom'):
+                out[key] = form.get(key)
+            out['header'] = form.get('header')
+            out['footer'] = form.get('footer')
+            return out
+
+        def done(b):
+            if b == 'OK':
+                self.snapshot()
+                new = collect()
+                for k in list(new):
+                    if new[k] == richdoc.DOC_DEFAULTS.get(k) and k not in ('footer', 'header'):
+                        new.pop(k)
+                self.doc.settings = new
+                self.lay = None
+                self.after_edit()
+            self.close_form()
+
+        def ch(key, label, values, labels, value):
+            return {'key': key, 'label': label, 'kind': 'choice', 'values': values,
+                    'labels': labels, 'value': value if value in values else values[0],
+                    'on_change': refresh}
+
+        def tf(key, label, value):
+            f = TextField(value)
+            return {'key': key, 'label': label, 'kind': 'text', 'field': f, 'on_change': refresh}
+
+        papers = richdoc.PAPER_ORDER
+        rows = [
+            ch('paper', 'Paper', papers, [richdoc.PAPERS[p][2] for p in papers], pg.paper),
+            ch('cpi', 'Characters per inch', ['10', '12'], ['10 cpi (Pica, 80 columns)',
+                                                         '12 cpi (Elite, 96 columns)'], str(pg.cpi)),
+            ch('lpi', 'Lines per inch', ['6', '8'], ['6 lpi', '8 lpi'], str(pg.lpi)),
+            ch('left', 'Left margin', margin_vals, margin_lbl, str(s.get('left', ''))),
+            ch('right', 'Right margin', margin_vals, margin_lbl, str(s.get('right', ''))),
+            ch('top', 'Top margin (lines)', margin_vals[:12], margin_lbl[:12], str(s.get('top', ''))),
+            ch('bottom', 'Bottom margin (lines)', margin_vals[:12], margin_lbl[:12],
+               str(s.get('bottom', ''))),
+            tf('header', 'Header', pg.header),
+            tf('footer', 'Footer', pg.footer),
+            {'label': 'Header/footer: left|centre|right, fields {page} {pages} {title} {date}',
+             'kind': 'info'},
+            {'label': '', 'kind': 'info'},
+        ]
+        info = rows[-1]
+        form = Form('page', 'Page setup', rows, ['OK', 'Cancel'], done, width=76)
+        self.form = form
+        refresh()
+
+    def print_form(self):
+        cfg = self.wm.cfg
+        lay = self.layout()
+        cur_page = lay.caret(*self.cur)[1] // self.pg.rows + 1
+
+        def done(b):
+            if b == 'Cancel':
+                self.close_form()
+                return
+            cfg['printer_device'] = form.get('device').strip()
+            cfg['printer_quality'] = form.get('quality')
+            cfg['printer_pictures'] = form.get('pictures')
+            try:
+                cfg.save()
+            except Exception:                  # noqa: BLE001
+                pass
+            if b == 'Preview':
+                self.close_form()
+                self.enter_gfx()
+                return
+            pick = None
+            which = form.get('pages')
+            if which == 'current':
+                pick = [cur_page]
+            elif which == 'range':
+                pick = parse_pages(form.get('range'), self.pages)
+                if not pick:
+                    self.wm.toast('Pages: e.g. 1-3,5', 'red')
+                    return
+            self.close_form()
+            self.print_doc(pick=pick, copies=int(form.get('copies')), test=b == 'Test page')
+
+        rows = [
+            {'key': 'device', 'label': 'Printer', 'kind': 'text',
+             'field': TextField(cfg.get('printer_device', ''),
+                                placeholder='/dev/lp0, /dev/usb/lp0 or CUPS queue')},
+            {'key': 'quality', 'label': 'Quality', 'kind': 'choice',
+             'values': ['draft', 'letter'], 'labels': ['Draft (fast)', 'Letter quality'],
+             'value': cfg.get('printer_quality', 'draft')},
+            {'key': 'pages', 'label': 'Pages', 'kind': 'choice',
+             'values': ['all', 'current', 'range'],
+             'labels': ['All (%d)' % self.pages, 'Current (%d)' % cur_page, 'Range'],
+             'value': 'all'},
+            {'key': 'range', 'label': 'Range', 'kind': 'text', 'field': TextField('1-%d' % self.pages)},
+            {'key': 'copies', 'label': 'Copies', 'kind': 'choice',
+             'values': [str(v) for v in range(1, 10)], 'value': '1'},
+            {'key': 'pictures', 'label': 'Pictures', 'kind': 'choice', 'values': ['gfx', 'text'],
+             'labels': ['As set per picture', 'All as ASCII (no graphics)'],
+             'value': cfg.get('printer_pictures', 'gfx')},
+            {'label': '%s - IBM Proprinter X24E (PPDS)' % self.pg.describe(), 'kind': 'info'},
+            {'label': 'Paper: put the top edge at the tear bar before printing.', 'kind': 'info'},
+        ]
+        form = Form('print', 'Print', rows, ['Print', 'Preview', 'Test page', 'Cancel'], done,
+                    width=72)
+        self.form = form
+        self.invalidate()
+
+    # ================================================================ find / replace
+    def open_find(self, focus='q'):
+        if not self.find:
+            sel = self.selection_text()
+            self.find = {'q': TextField(sel if sel and '\n' not in sel else ''),
+                         'r': TextField(''), 'focus': focus, 'note': ''}
+        self.find['focus'] = focus
+        self.invalidate()
+
+    def find_next(self, wrap=True):
+        if not self.find or not self.find['q'].text:
+            self.open_find('q')
+            return False
+        q = self.find['q'].text.lower()
+        pi, i = self.sel_range()[1] if self.sel_range() else self.cur
+        n = len(self.doc.paras)
+        for step in range(n + 1):
+            k = (pi + step) % n
+            if step == n and not wrap:
+                break
+            t = self.doc.paras[k].text.lower()
+            j = t.find(q, i if step == 0 else 0)
+            if j >= 0:
+                self.anchor = (k, j)
+                self.cur = (k, j + len(q))
+                self.find['note'] = ''
+                self.ensure_visible()
+                self.invalidate()
+                return True
+        self.find['note'] = 'not found'
+        self.invalidate()
+        return False
+
+    def replace_one(self):
+        r = self.sel_range()
+        q = self.find['q'].text
+        if r and q and self.selection_text().lower() == q.lower():
+            self.snapshot()
+            (p0, i0), _ = r
+            style = self.doc.paras[p0].st[i0] if i0 < len(self.doc.paras[p0].st) else None
+            self.delete_sel()
+            self.insert_chars(self.find['r'].text, style)
+            self.after_edit()
+        return self.find_next()
+
+    def replace_all(self):
+        q = self.find['q'].text
+        if not q:
+            return
+        rep = self.find['r'].text
+        self.snapshot()
+        count = 0
+        low = q.lower()
+        for p in self.doc.paras:
+            if p.kind in ('tsep', 'pagebreak', 'rule'):
+                continue
+            t, st = p.text, p.st
+            out_t, out_s, i = [], [], 0
+            while True:
+                j = t.lower().find(low, i)
+                if j < 0:
+                    break
+                out_t.append(t[i:j])
+                out_s.extend(st[i:j])
+                out_t.append(rep)
+                out_s.extend([st[j]] * len(rep))
+                i = j + len(q)
+                count += 1
+            if i:
+                out_t.append(t[i:])
+                out_s.extend(st[i:])
+                p.set(''.join(out_t), out_s)
+        self.cur = self._clamp(self.cur)
+        self.anchor = None
+        self.find['note'] = '%d replaced' % count
+        self.after_edit()
+
+    def find_key(self, ev):
+        f = self.find
+        k = ev.key
+        if k == 'esc':
+            self.find = None
+        elif k == 'tab' or k == 'shift+tab':
+            f['focus'] = 'r' if f['focus'] == 'q' else 'q'
+        elif k == 'enter':
+            if f['focus'] == 'r':
+                self.replace_one()
+            else:
+                self.find_next()
+        elif k in ('f3', 'down'):
+            self.find_next()
+        elif k == 'alt+a':
+            self.replace_all()
+        else:
+            f[f['focus']].key(ev)
+            f['note'] = ''
+        self.invalidate()
+        return True
+
+
+    # ================================================================ graphics preview
+    def enter_gfx(self):
+        """F6: the sheets as the printer puts them on paper - dots on the framebuffer."""
+        if self.gfx:
+            return
+        try:
+            from .. import fbmode, printraster      # noqa: F401
+        except ImportError as e:
+            self.wm.toast('Print preview: %s' % e, 'red')
+            return
+        ok, why = fbmode.available(self.wm.term)
+        if not ok:
+            self.wm.toast('Print preview: ' + why, 'red')
+            return
+        if self.source:
+            self.toggle_source()
+        th = self.th
+        rgb = th.rgb
+        colours = {'bg': rgb[th.r['shadow']], 'fg': rgb[th.r['bright']],
+                   'dim': rgb[th.r['dim']], 'accent': rgb[th.r['accent']],
+                   'field': rgb[th.r['field']]}
+        try:
+            pg, sheets = self.make_sheets()
+            ras = printraster.Raster(pg, font_name=self.wm.cfg.get('font'))
+        except Exception as e:                       # noqa: BLE001
+            self.wm.toast('Print preview: %s' % e, 'red')
+            return
+        if self.wm.cfg.get('printer_pictures') == 'text':
+            for sh in sheets:
+                sh.gfx = []
+        try:
+            sess = fbmode.Session(self.wm.term.fd_out, fbmode.open_framebuffer(), colours)
+            sess.start()
+        except OSError as e:
+            self.wm.toast('Print preview: %s' % e, 'red')
+            return
+        self.gfx = sess
+        self.wm.enter_gfx(self)
+        lay = self.layout()
+        cur = lay.caret(*self.cur)[1] // self.pg.rows
+        self.pv = {'sheets': sheets, 'ras': ras, 'page': min(cur, len(sheets) - 1), 'y': 0,
+                   'x': 0, 'zoom': 'width', 'cache': {}, 'pg': pg}
+        self.gfx.note(['PRINT PREVIEW  %s' % pg.describe().upper(),
+                       'PGUP/PGDN PAGE  ARROWS SCROLL  Z ZOOM  P PRINT  ESC BACK'], 5.0)
+        self.gfx_paint()
+
+    def leave_gfx(self):
+        if not self.gfx:
+            return
+        sess, self.gfx = self.gfx, None
+        try:
+            sess.close()
+        finally:
+            self.wm.leave_gfx()
+            self.pv = None
+            self.invalidate()
+
+    PAPER_RGB = (244, 240, 226)
+    INK_RGB = (28, 28, 44)
+    DESK_RGB = (52, 52, 56)
+
+    def gfx_page(self, k):
+        """The sheet as an 'L' image at 180 dpi (ink = 255), cached."""
+        pv = self.pv
+        img = pv['cache'].get(('dots', k))
+        if img is None:
+            img = pv['ras'].render(pv['sheets'][k])
+            pv['cache'][('dots', k)] = img
+        return img
+
+    def gfx_scaled(self, k, W, H):
+        from PIL import Image, ImageOps
+        pv = self.pv
+        key = ('scaled', k, pv['zoom'], W, H)
+        img = pv['cache'].get(key)
+        if img is None:
+            dots = self.gfx_page(k)
+            if pv['zoom'] == 'dots':
+                sw, sh = dots.size
+            elif pv['zoom'] == 'page':
+                sh = H - 24
+                sw = int(dots.size[0] * sh / float(dots.size[1]))
+            else:
+                sw = W - 48
+                sh = int(dots.size[1] * sw / float(dots.size[0]))
+            small = dots.resize((max(1, sw), max(1, sh)), Image.BOX) if (sw, sh) != dots.size \
+                else dots
+            img = ImageOps.colorize(ImageOps.invert(small), self.INK_RGB, self.PAPER_RGB)
+            pv['cache'][key] = img
+        return img
+
+    def gfx_paint(self):
+        if not self.gfx or not self.pv:
+            return
+        from PIL import Image
+        g = self.gfx
+        pv = self.pv
+        W, H = g.screen
+        page = self.gfx_scaled(pv['page'], W, H)
+        pw, ph = page.size
+        pv['y'] = max(0, min(pv['y'], max(0, ph - H + 40)))
+        pv['x'] = max(0, min(pv['x'], max(0, pw - W + 40)))
+        canvas = Image.new('RGB', (g.fb.line_px, H), self.DESK_RGB)
+        x = (W - pw) // 2 if pw <= W else 20 - pv['x']
+        y = 12 - pv['y']
+        canvas.paste((18, 18, 20), (x + 6, y + 6, x + pw + 6, y + ph + 6))      # shadow
+        canvas.paste(page, (x, y))
+        target = {32: 'BGRX', 24: 'BGR', 16: 'BGR;16'}[g.fb.bpp]
+        frame = bytearray(canvas.tobytes('raw', target))
+        self.gfx_hud(frame)
+        g.show(frame)
+
+    def gfx_hud(self, buf):
+        g = self.gfx
+        pv = self.pv
+        W, H = g.screen
+        px = 2
+        bh = 8 * px
+        y0 = H - bh
+        g.rect(buf, 0, 0, y0, W, bh, g.c_bg)
+        g.rect(buf, 0, 0, y0, W, px, g.c_acc)
+        ty = y0 + 2 * px
+        name = (os.path.basename(self.path) if self.path else 'UNTITLED').upper()
+        g.text(buf, 0, 2 * px, ty, name[:40], px, g.c_fg)
+        info = 'PAGE %d/%d  %s  %s' % (pv['page'] + 1, len(pv['sheets']),
+                                       {'width': 'FIT WIDTH', 'page': 'WHOLE PAGE',
+                                        'dots': '180 DPI'}[pv['zoom']],
+                                       pv['pg'].describe().upper())
+        iw = fbmode_text_width(info, px)
+        g.text(buf, 0, W - iw - 2 * px, ty, info, px, g.c_dim)
+
+    def gfx_key(self, ev):
+        k = ev.key
+        pv = self.pv
+        n = len(pv['sheets'])
+        step = 64
+        if k in ('esc', 'f6', 'g', 'q'):
+            self.leave_gfx()
+            return True
+        if k in ('pgdn', ' ', 'space', 'n'):
+            if pv['page'] + 1 < n:
+                pv['page'] += 1
+                pv['y'] = 0
+        elif k in ('pgup', 'b', 'backspace'):
+            if pv['page'] > 0:
+                pv['page'] -= 1
+                pv['y'] = 0
+        elif k == 'home':
+            pv['page'], pv['y'] = 0, 0
+        elif k == 'end':
+            pv['page'], pv['y'] = n - 1, 0
+        elif k == 'down':
+            pv['y'] += step
+        elif k == 'up':
+            pv['y'] -= step
+        elif k == 'right':
+            pv['x'] += step
+        elif k == 'left':
+            pv['x'] -= step
+        elif k in ('z', '+', '-', '0'):
+            order = ['width', 'page', 'dots']
+            pv['zoom'] = order[(order.index(pv['zoom']) + 1) % 3]
+            pv['y'] = pv['x'] = 0
+        elif k == 'p':
+            self.leave_gfx()
+            self.print_form()
+            return True
+        else:
+            return True
+        self.gfx_paint()
+        return True
+
+    def gfx_mouse(self, ev):
+        if ev.kind in ('wheelup', 'wheeldown'):
+            self.pv['y'] += -64 if ev.kind == 'wheelup' else 64
+            self.gfx_paint()
+        elif ev.kind == 'down' and ev.button == 2:
+            self.leave_gfx()
+        return True
 
     # ================================================================ movement
     def move_v(self, d):
@@ -1436,33 +2790,46 @@ class Writer(App):
 
     # ================================================================ input
     def on_click(self, key, ev):
-        acts = {'new': lambda: self.wm.open('writer'), 'save': self.save, 'docx': self.export_docx,
-                'bold': lambda: self.toggle('bold'),
-                'underline': lambda: self.cycle_ul(1), 'underline2': lambda: self.cycle_ul(2),
-                'size1': lambda: self.cycle_size(1),
-                'size2': lambda: self.cycle_size(2), 'size3': lambda: self.cycle_size(3),
-                'image': self.insert_image, 'source': self.toggle_source,
-                'print': self.print_doc, 'head': self.cycle_heading, 'list': self.toggle_list,
-                'focus': self.toggle_focus,
-                'fwrap': lambda: self.float_key('w', ev), 'fsmall': lambda: self.float_key('-', ev),
-                'fbig': lambda: self.float_key('+', ev), 'fdel': lambda: self.float_key('delete', ev)}
-        if self.source and key in ('bold', 'underline', 'underline2', 'size1', 'size2', 'size3',
-                                   'head', 'list', 'image'):
-            self.wm.toast('Formatting works on the page (F5)', 'dim')
+        if isinstance(key, tuple) and key[0] in ('form<', 'form>', 'formv', 'formt', 'fbtn'):
+            if self.form:
+                self.form.click(key, ev)
+            self.invalidate()
             return
-        if key == 'txt':
-            self.export_txt()
+        if isinstance(key, tuple) and key[0] == 'menu':
+            self.open_menu(key[1])
+            return
+        if isinstance(key, tuple) and key[0] == 'findfield':
+            self.find['focus'] = key[1]
+            self.find[key[1]].click(max(0, ev.x - key[2]))
+            self.invalidate()
+            return
+        if isinstance(key, tuple) and key[0] == 'align':
+            if not self.source:
+                self.set_align(key[1])
+            return
+        acts = {'bold': lambda: self.toggle('bold'),
+                'underline': lambda: self.cycle_ul(1), 'underline2': lambda: self.cycle_ul(2),
+                'stylemenu': self.style_menu, 'sizemenu': self.size_menu,
+                'image': self.insert_image, 'table': lambda: self.insert_table(),
+                'fonts': self.fonts_form,
+                'fwrap': lambda: self.float_key('w', ev), 'fsmall': lambda: self.float_key('-', ev),
+                'fbig': lambda: self.float_key('+', ev), 'fdel': lambda: self.float_key('delete', ev),
+                'fout': lambda: self.float_key('g', ev),
+                'fnext': self.find_next, 'frepl': self.replace_one, 'fall': self.replace_all,
+                'fclose': lambda: setattr(self, 'find', None),
+                # names of the first version (scripts, tests)
+                'size1': lambda: self.cycle_size(1), 'size2': lambda: self.cycle_size(2),
+                'size3': lambda: self.cycle_size(3), 'source': self.toggle_source,
+                'print': self.print_form, 'head': self.cycle_heading, 'list': self.toggle_list,
+                'focus': self.toggle_focus, 'save': self.save, 'docx': self.export_docx,
+                'txt': self.export_txt, 'open': self.open_file,
+                'new': lambda: self.wm.open('writer')}
+        if self.source and key in ('bold', 'underline', 'underline2', 'size1', 'size2', 'size3',
+                                   'head', 'list', 'image', 'table', 'stylemenu', 'sizemenu'):
+            self.wm.toast('Formatting works on the page (F5)', 'dim')
             return
         if key in acts:
             acts[key]()
-        elif key == 'open':
-            def ok(p):
-                if self.modified or self.path:
-                    self.wm.open('writer', path=p)
-                else:
-                    self.load(p)
-                self.update_title()
-            self.wm.pick_file(ok, 'open', parent=self.win)
         elif isinstance(key, tuple) and key[0] == 'ol':
             if self.source:
                 self.toggle_source()
@@ -1475,8 +2842,9 @@ class Writer(App):
 
     def toggle_focus(self):
         self.focus_mode = not self.focus_mode
-        if self.focus_mode and not self.win.snap:
+        if self.focus_mode and not getattr(self.win, 'snap', None):
             self.wm.toggle_max(self.win)
+        self.invalidate()
 
     def doc_xy(self, ev):
         """Mouse event -> (x on the page, row on the screen across all sheets)."""
@@ -1486,13 +2854,41 @@ class Writer(App):
         return self.pages * self.block
 
     def on_mouse(self, ev):
+        if self.gfx:
+            return self.gfx_mouse(ev)
+        if self.form:
+            k = self.track_hover(ev)
+            if ev.kind == 'down' and ev.button == 0 and isinstance(k, tuple) and \
+                    k[0] in ('form<', 'form>', 'formv', 'formt', 'fbtn'):
+                self.on_click(k, ev)
+                return True
+            if ev.kind == 'down':
+                x, y, w, h = self.form.rect
+                if not (x <= ev.x < x + w and y <= ev.y < y + h):
+                    self.close_form()
+            return True
+        k0 = self.zone_at(ev.x, ev.y)
+        if isinstance(k0, tuple) and k0[0] in ('menu', 'findfield', 'align') or \
+                k0 in ('stylemenu', 'sizemenu', 'fnext', 'frepl', 'fall', 'fclose'):
+            if ev.kind == 'down' and ev.button == 0:
+                self.track_hover(ev)
+                self.on_click(k0, ev)
+                return True
+            return super().on_mouse(ev)
+        if self.find and ev.kind == 'down' and k0 == 'text':
+            self.find['focus'] = None
         if self.source:
             return self.source_mouse(ev)
-        k = self.zone_at(ev.x, ev.y)
+        k = k0
         lay = self.layout()
         if ev.kind in ('wheelup', 'wheeldown') and k in ('text', 'sbar'):
-            self.top = max(0, min(max(0, self.total_rows() - self.view_h),
-                                  self.top + (-3 if ev.kind == 'wheelup' else 3)))
+            sw = self.pg.cols + 2
+            if 'shift' in ev.mods and self.avail < sw:
+                self.hx = max(0, min(sw - self.avail,
+                                     self.hx + (-4 if ev.kind == 'wheelup' else 4)))
+            else:
+                self.top = max(0, min(max(0, self.total_rows() - self.view_h),
+                                      self.top + (-3 if ev.kind == 'wheelup' else 3)))
             self.invalidate()
             return True
         g = self.sb
@@ -1607,23 +3003,46 @@ class Writer(App):
             self.pressed = None
         return super().on_mouse(ev)
 
-    def on_key(self, ev):
-        k = ev.key
+    def global_key(self, k):
+        """Keys that work everywhere (page and source view)."""
         if k == 'f5':
             self.toggle_source()
-            return True
-        if k == 'ctrl+s':
+        elif k == 'f6':
+            self.enter_gfx()
+        elif k == 'f10':
+            self.open_menu(0)
+        elif k in [a for _l, a in MENUS]:
+            self.open_menu([a for _l, a in MENUS].index(k))
+        elif k == 'ctrl+s':
             self.save()
-            return True
-        if k == 'ctrl+p':
-            self.print_doc()
-            return True
-        if k == 'ctrl+e':
-            self.export_docx()
-            return True
-        if k == 'ctrl+t':
+        elif k == 'ctrl+p':
+            self.print_form()
+        elif k == 'ctrl+o':
+            self.open_file()
+        elif k == 'ctrl+n':
+            self.wm.open('writer')
+        elif k == 'ctrl+t':
             self.toggle_focus()
+        elif k == 'ctrl+f':
+            self.open_find('q')
+        elif k == 'f3':
+            self.find_next()
+        else:
+            return False
+        self.invalidate()
+        return True
+
+    def on_key(self, ev):
+        k = ev.key
+        if self.gfx:
+            return self.gfx_key(ev)
+        if self.form:
+            self.form.key(ev)
             self.invalidate()
+            return True
+        if self.find and self.find['focus'] and k not in ('f5', 'f6', 'f10', 'ctrl+s', 'ctrl+p'):
+            return self.find_key(ev)
+        if self.global_key(k):
             return True
         if self.source:
             return self.source_key(ev)
@@ -1651,6 +3070,9 @@ class Writer(App):
             return True
         if k == 'enter':
             self.enter()
+        elif k == 'ctrl+enter':
+            self.insert_block('pagebreak')
+            return True
         elif k == 'backspace':
             self.backspace()
         elif k == 'delete':
@@ -1686,6 +3108,9 @@ class Writer(App):
         elif k == 'ctrl+g':
             self.cycle_size()
             return True
+        elif k == 'ctrl+e':
+            self.cycle_align()
+            return True
         elif k == 'ctrl+l':
             self.toggle_list()
             return True
@@ -1705,7 +3130,9 @@ class Writer(App):
             else:
                 return True
         elif k == 'esc':
-            if self.anchor is not None:
+            if self.find:
+                self.find = None
+            elif self.anchor is not None:
                 self.anchor = None
             elif self.focus_mode:
                 self.focus_mode = False
@@ -1744,6 +3171,14 @@ class Writer(App):
         return True
 
     def on_paste(self, text):
+        if self.form:
+            self.form.paste(text)
+            self.invalidate()
+            return
+        if self.find and self.find['focus']:
+            self.find[self.find['focus']].insert(text.replace('\n', ' '))
+            self.invalidate()
+            return
         if self.source:
             self.ta.insert(text, 'other')
             self.ta.ensure_visible()
@@ -1754,6 +3189,11 @@ class Writer(App):
             self.after_edit()
         self.update_title()
         self.invalidate()
+
+
+def fbmode_text_width(text, px):
+    from .. import fbmode
+    return fbmode.text_width(text, px)
 
 
 APP = Writer
