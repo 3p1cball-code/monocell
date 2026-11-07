@@ -637,6 +637,18 @@ Details, Maus-/Tastaturhinweise und Deinstallation: `deploy/x61s/README.md`.
 * Der Writer kennt bewusst kein Kursiv: die Linux-Konsole stellt es nicht dar und der
   IBM Proprinter (PPDS) kann es nicht drucken.
 
+## Fernsteuerung: TRD
+
+[**TRD — Text Remote Desktop**](https://github.com/3p1cball-code/trd) zeigt den
+Bildschirm eines Monocell-Desktops in einem Fenster auf einem anderen Rechner: die
+Zellmatrix geht als Diff durch einen SSH-Tunnel, gezeichnet mit der PSF-Schrift des
+Ziels, dazu der Ton. Der Server steckt in Monocell (`monocell/remote.py`, nur auf
+127.0.0.1 mit Zufallstoken, Metadatei `~/.cache/monocell/trd.json`); der Client ist
+ein eigenes Repo (PyQt6, MIT).
+
+    ssh -L …   # passiert im Client; auf dem Ziel genügt ein laufendes Monocell
+    trd --host x61s --user ariedel
+
 ## Lizenz
 
 MIT, siehe [LICENSE](LICENSE). © 2026 Alexander Riedel.
