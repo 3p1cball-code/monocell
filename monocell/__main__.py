@@ -18,7 +18,7 @@ def main(argv=None):
     ap.add_argument('--open', default='', help='comma separated apps to open at start (e.g. files,terminal)')
     ap.add_argument('--color', default=None, help='auto|truecolor|palette|linux|ansi')
     ap.add_argument('--tile', action='store_true', help='tile the opened windows')
-    ap.add_argument('--lowmem', action='store_true', help='low-memory profile: plain desktop, no shadows, pixel video, lite web')
+    ap.add_argument('--lowmem', action='store_true', help='low-memory profile: plain desktop, no shadows')
     ap.add_argument('--trd-port', type=int, default=0, help='TRD server port (0 = ephemeral, 127.0.0.1 only)')
     ap.add_argument('--trd-meta', default='', help='TRD meta file (default: ~/.cache/monocell/trd.json)')
     ap.add_argument('files', nargs='*', help='files to open')
@@ -32,9 +32,11 @@ def main(argv=None):
     if args.lowmem:
         # session overrides, not written back to the config
         # only performance knobs; look, image mode and browser engine stay user choices
+        # video keeps the configured frame rate: the renderer and the console are
+        # fast enough for 24 fps even at 204x109, and the player drops frames by
+        # itself when something else is running
         cfg.set_session({
             'shadows': False,
-            'video_fps': 10,
         })
     util.STRICT_ASCII = cfg['strict_ascii']
     theme = Theme(cfg)

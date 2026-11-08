@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.1 — 2026-11-08
+
+- `--lowmem` no longer caps video at 10 fps. With the new renderers even 204x109 cells
+  play at the configured rate (24 fps on the X61s, about 40 % of one core); the player
+  still drops frames by itself when the machine is busy. Before, video stayed choppy
+  although the CPU had plenty of headroom.
+
 ## 1.4.0 — 2026-11-08
 
 - **minimal-cell**, Monocell's own console font: 5x7 pixels (204x109 characters on
