@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.4.0 — 2026-11-08
+
+- **minimal-cell**, Monocell's own console font: 5x7 pixels (204x109 characters on
+  the 1024x768 X61s, Terminus 6x12 gives 170x64) and a 5x8 cut with one more row of
+  line spacing (204x96). All of ASCII and Latin-1 including the umlauts, box
+  drawing (light and double, heavy/mixed drawn with the light shapes), shades and
+  block elements that use the whole cell, arrows and UI symbols; accented letters of
+  Latin Extended fall back to their base letter. Built from a pixel design by
+  `tools/make_minimal_cell.py` (reproducible, checked by a test), offered as
+  *minimal-cell 5x7 / 5x8* in Settings -> Appearance -> Theme -> Font.
+- **Faster text-mode video and pictures**, needed for the many cells of minimal-cell.
+  The image -> cell renderers (blend, pixel, ascii, mono, grey) run on whole arrays
+  with numpy when it is installed - same cells as the pure-python loops, which stay
+  as the fallback (`MONOCELL_NO_NUMPY=1`). The terminal flush compares rows in
+  blocks of 8 cells and writes each span with one join; on the console it sends
+  only the part of the colour that changes (`\e[34m` instead of `\e[0;1;34;40m`),
+  about 30 % fewer bytes for the kernel to parse. X61s, 204x109 cells at 24 fps:
+  render 43 -> 3 ms per frame, Monocell CPU 85 % (frames dropped) -> 37 %.
+  `tools/vidbench.py` and `tools/stagebench.py` measure it.
+- `Renderer.nearest` decides per colour bucket, not by the first colour seen in it -
+  pictures no longer depend on the order in which colours were rendered.
+- `tools/snap.py --psf` picks glyphs through the font's unicode table, so umlauts
+  and symbols show correctly in fonts that do not keep Latin-1 at its code points.
+
 ## 1.3.2 — 2026-11-07
 
 - **Writer for the dot-matrix printer** (IBM Proprinter X24E, PPDS). The page is the
