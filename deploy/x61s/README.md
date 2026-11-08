@@ -69,8 +69,9 @@ Das setzt `multi-user.target` als Standard und deaktiviert den Displaymanager
 braucht ~25 MB RSS im Leerlauf (gemessen mit `tools/memcheck.py`), gegenüber
 einer grafischen Sitzung mit mehreren hundert MB.
 
-`monocell-session` startet mit `--lowmem`: nur Performance-Regler (keine Schatten,
-Video mit 10 fps). Aussehen, Bildmodus und Web-Engine folgen deinen Einstellungen.
+`monocell-session` startet ohne `--lowmem`: Schatten, Video-Bildrate, Aussehen,
+Bildmodus und Web-Engine folgen deinen Einstellungen. Der Schalter existiert weiter
+(er schaltet nur die Fenster-Schatten ab), die Session braucht ihn nicht mehr.
 
 ## Alternativer GRUB-Eintrag (direkt in monocell booten)
 

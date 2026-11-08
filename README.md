@@ -627,9 +627,9 @@ bootet in eine **Text-Anmeldung** (Fingerprint/Passwort) und startet danach mono
 ohne den Standard-Boot zu ändern: `sudo deploy/x61s/install-grub-entry.sh`, danach
 `sudo deploy/x61s/install-login.sh --user NAME`. Für die Zwischenablage per Handy:
 `sudo deploy/x61s/install-kdeconnect.sh --user NAME` (installiert KDE Connect, Xvfb
-und xclip). `--lowmem` (in der Session automatisch) schaltet nur die Performance-Regler:
-keine Fenster-Schatten und Video mit 10 fps; Aussehen, Bildmodus und Web-Engine
-bleiben deine Einstellungen.
+und xclip). `--lowmem` schaltet nur die Fenster-Schatten ab; die X61s-Session startet ohne den
+Schalter, Video läuft mit der eingestellten Bildrate. Aussehen, Bildmodus und
+Web-Engine bleiben deine Einstellungen.
 Details, Maus-/Tastaturhinweise und Deinstallation: `deploy/x61s/README.md`.
 
 ## Grenzen

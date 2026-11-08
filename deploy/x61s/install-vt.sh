@@ -98,7 +98,7 @@ sed "s|@USER@|$USER_NAME|g; s|@BIN@|$BIN|g" > "$BIN/monocell-session" <<'SESSION
 #!/bin/sh
 # Shell fallback after leaving monocell on the console.
 while :; do
-    "@BIN@/monocell" --lowmem
+    "@BIN@/monocell"
     echo
     echo "monocell beendet. Shell (exit startet monocell neu)."
     /bin/bash -l

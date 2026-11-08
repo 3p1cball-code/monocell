@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The X61s session (`monocell-session`, `.profile` autostart, deploy scripts) no longer
+  runs `monocell --lowmem`: shadows on, video at the configured frame rate. The switch
+  itself still exists and now only turns shadows off.
+
 ## 1.4.1 — 2026-11-08
 
 - `--lowmem` no longer caps video at 10 fps. With the new renderers even 204x109 cells

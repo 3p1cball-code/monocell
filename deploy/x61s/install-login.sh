@@ -58,7 +58,7 @@ block = '''# >>> monocell console >>>
 if [ -z "${SSH_CONNECTION:-}" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ] \\
    && [ -z "${MONOCELL_NO_AUTOSTART:-}" ]; then
     if [ "$(tty 2>/dev/null)" = "/dev/tty1" ] && command -v monocell >/dev/null 2>&1; then
-        TERM=linux exec monocell --lowmem
+        TERM=linux exec monocell
     fi
 fi
 # <<< monocell console <<<
