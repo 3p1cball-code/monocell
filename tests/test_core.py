@@ -1136,7 +1136,8 @@ class TestAppearanceEditor(unittest.TestCase):
 class TestConsoleFontChoices(unittest.TestCase):
     def test_every_offered_font_resolves(self):
         from monocell import theme
-        sizes = {'Lat15-Terminus12x6.psf.gz': (6, 12),
+        sizes = {'MinimalCell-5x7.psf.gz': (5, 7), 'MinimalCell-5x8.psf.gz': (5, 8),
+                 'Lat15-Terminus12x6.psf.gz': (6, 12),
                  'Lat15-Terminus14.psf.gz': (8, 14),
                  'Lat15-Terminus16.psf.gz': (8, 16),
                  'Lat15-TerminusBold16.psf.gz': (8, 16),
@@ -1156,3 +1157,5 @@ class TestConsoleFontChoices(unittest.TestCase):
         self.assertEqual((1024 // small[0], 768 // small[1]), (170, 64))
         self.assertGreater(1024 // small[0], 1024 // wide[0])
         self.assertGreater(768 // small[1], 768 // wide[1])
+        tiny = theme.console_font_cell('MinimalCell-5x7.psf.gz')
+        self.assertEqual((1024 // tiny[0], 768 // tiny[1]), (204, 109))

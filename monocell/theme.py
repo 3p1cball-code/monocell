@@ -201,6 +201,8 @@ FONT_DIRS = (
 FONT_CHOICES = (
     # label, file; the grid is for a 1024x768 console - smaller glyphs mean more
     # cells, which is what ASCII pictures and video gain from
+    ('minimal-cell 5x7', 'MinimalCell-5x7.psf.gz'),
+    ('minimal-cell 5x8', 'MinimalCell-5x8.psf.gz'),
     ('Terminus 6x12', 'Lat15-Terminus12x6.psf.gz'),
     ('Terminus 8x14', 'Lat15-Terminus14.psf.gz'),
     ('Terminus 8x16', 'Lat15-Terminus16.psf.gz'),

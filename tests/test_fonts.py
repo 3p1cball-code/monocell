@@ -61,6 +61,58 @@ class TestConsoleFonts(unittest.TestCase):
         self.assertIsNone(theme.console_font_path('/usr/share/consolefonts/x.psf.gz'))
         self.assertIsNone(theme.console_font_path(''))
 
+    def test_minimal_cell_is_built_from_the_design(self):
+        import gzip
+        import make_minimal_cell as mc
+        for h in (7, 8):
+            path = os.path.join(ROOT, 'monocell', 'fonts', 'MinimalCell-5x%d.psf.gz' % h)
+            with open(path, 'rb') as f:
+                committed = gzip.decompress(f.read())
+            self.assertEqual(mc.build(h)[0], committed,
+                             'run tools/make_minimal_cell.py after changing the design')
+
+    def test_minimal_cell_in_the_font_menu(self):
+        names = dict((n, l) for l, n in theme.available_fonts())
+        self.assertEqual(names.get('MinimalCell-5x7.psf.gz'), 'minimal-cell 5x7')
+        self.assertEqual(names.get('MinimalCell-5x8.psf.gz'), 'minimal-cell 5x8')
+        self.assertEqual(theme.console_font_cell('MinimalCell-5x7.psf.gz'), (5, 7))
+        self.assertEqual(theme.console_font_cell('MinimalCell-5x8.psf.gz'), (5, 8))
+
+    def test_minimal_cell_covers_latin1(self):
+        from monocell.fbmode import load_psf
+        for h in (7, 8):
+            path = os.path.join(ROOT, 'monocell', 'fonts', 'MinimalCell-5x%d.psf.gz' % h)
+            w, hh, glyphs, umap = load_psf(path)
+            self.assertEqual((w, hh, len(glyphs)), (5, h, 512))   # fbcon: 256 or 512
+            for o in list(range(32, 127)) + list(range(160, 256)):
+                self.assertEqual(umap.get(chr(o)), o, 'U+%04X' % o)
+            for ch in '█▀▄▌▐░▒▓─│┌┐└┘├┤┬┴┼═║╔╗╚╝╬━┃€…•←→\ufffd':
+                self.assertIn(ch, umap, ch)
+            self.assertEqual(umap['┏'], umap['┌'])         # heavy -> light shape
+            self.assertEqual(umap['Ā'], umap['A'])         # accented -> base letter
+
+    def test_minimal_cell_metrics(self):
+        import make_minimal_cell as mc
+        for h in (7, 8):
+            g = mc.charmap(h)
+            full = [[1] * 5 for _ in range(h)]
+            self.assertEqual(g['█'], full)
+            self.assertEqual(g[' '], [[0] * 5 for _ in range(h)])
+            for a, b in (('▀', '▄'), ('▌', '▐'), ('▘', '▟'), ('▚', '▞'), ('░', '▓')):
+                self.assertEqual([[x | y for x, y in zip(p, q)] for p, q in zip(g[a], g[b])], full)
+                self.assertFalse(any(x & y for p, q in zip(g[a], g[b]) for x, y in zip(p, q)))
+            # text keeps column 4 free (the gap) - but M W m w X need all five
+            wide = set('MWmwX©®') | set('↔▲▼◆♥♦♣♠♪∞√')
+            for o in list(range(33, 127)) + list(range(161, 256)):
+                ch = chr(o)
+                if ch not in wide:
+                    self.assertFalse(any(row[4] for row in g[ch]), ch)
+            # lines run to the cell edges, so neighbours join
+            self.assertTrue(g['─'][3][0] and g['─'][3][4])
+            self.assertTrue(g['│'][0][2] and g['│'][h - 1][2])
+            # descender and line gap: nothing of the text below row 6
+            self.assertTrue(all(not any(row) for row in g['g'][7:]))
+
     def test_dash_is_one_bar(self):
         d = os.path.join(ROOT, 'monocell', 'fonts')
         for name in sorted(os.listdir(d)):

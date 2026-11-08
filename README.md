@@ -34,6 +34,14 @@ dem PSF-Font und der Theme-Palette (`tools/snap.py --psf`):
 | ![Startmenü auf der Konsole](screenshots/console-menu.png) | ![Writer auf der Konsole](screenshots/writer.png) |
 | ![Dateisuche](screenshots/console-search.png) | ![Login-Screen](screenshots/login.png) |
 
+**Noch kleiner: minimal-cell.** Monocells eigene 5×7-Schrift (ASCII, Latin-1, Umlaute,
+Rahmenlinien, Schattierungen und Blöcke über die ganze Zelle) zeigt auf dem X61s
+**204×109** Zeichen statt 113×48; ein 5×8-Schnitt bringt eine Zeile mehr Abstand.
+Erzeugt von `tools/make_minimal_cell.py`, im Font-Menü als *minimal-cell 5x7 / 5x8*.
+Das Bild ist echte Ausgabe mit dem PSF-Font, 204×109:
+
+![minimal-cell 5x7 auf der Konsole](screenshots/minimal-cell.png)
+
 **Text-Screenshot:** `Alt+S` speichert zwei Dateien in `~/monocell-shots/`:
 `…md` mit dem Bild als reinem Text (lesbar in Kate, GitHub und jedem Editor) und
 `…-colour.html` mit derselben Ansicht in exakten Farben (im Browser oder in Kates
@@ -514,7 +522,11 @@ kleineren Font: Monocell bringt Terminus **6x12**, 8x14, 8x16 (auch fett), 10x20
 12x24 mit (OFL) – unter Einstellungen → Appearance → Theme → *Font* steht hinter jedem
 Eintrag, welches Raster er auf dem aktuellen Bildschirm ergibt. Mit 6x12 zeigt der
 X61s **170x64** statt 113x48 Zeichen; ASCII-Bilder und Video gewinnen dadurch
-deutlich (Fenster mit `Alt+M` maximieren, laufendes Video setzt sich neu). monocell braucht kein `gpm`, kein X, kein
+deutlich (Fenster mit `Alt+M` maximieren, laufendes Video setzt sich neu). Noch
+kleiner ist Monocells eigene Schrift **minimal-cell** (5x7, mit einer Zeile mehr
+Abstand auch 5x8): alle ASCII- und Latin-1-Zeichen, Umlaute, Rahmenlinien,
+Schattierungen und Blöcke in 5x7 Pixeln – **204x109** Zeichen auf dem X61s. Sie wird
+von `tools/make_minimal_cell.py` aus einer Pixelvorlage erzeugt. monocell braucht kein `gpm`, kein X, kein
 Framebuffer-Programm – nur eine Konsole mit ANSI-Farben. Für den Grafikmodus des
 Videoplayers muss der Benutzer in der Gruppe `video` sein (Schreibrecht auf `/dev/fb0`).
 

@@ -142,6 +142,10 @@ def render_psf(vt, path, psf_path):
     """Pixel-exact console screenshot: the real PSF font and the VT palette."""
     from PIL import Image
     width, height, glyphs = load_psf(psf_path)
+    # the unicode table decides the glyph (Latin-1 is not at its code point in
+    # every font, and symbols live in free slots); fonts without one: by index
+    from monocell.fbmode import load_psf as load_psf_umap
+    umap = load_psf_umap(psf_path)[3]
     nb = (width + 7) // 8
     pal = [hex_rgb(h) for h in PRESETS['Ember']]
     for i, c in vt.palette.items():
@@ -163,9 +167,15 @@ def render_psf(vt, path, psf_path):
                 for xx in range(width):
                     px[x0 + xx, y0 + yy] = bg_c
             c = chars[x]
-            g = glyphs[ord(c)] if ord(c) < len(glyphs) else glyphs[ord('?')]
-            if not any(g) and c != ' ':
-                g = glyphs[ord('?')]
+            if umap:
+                i = umap.get(c)
+                if i is None:
+                    i = umap.get('\ufffd', umap.get('?', ord('?')))
+                g = glyphs[i]
+            else:
+                g = glyphs[ord(c)] if ord(c) < len(glyphs) else glyphs[ord('?')]
+                if not any(g) and c != ' ':
+                    g = glyphs[ord('?')]
             for row in range(height):
                 bits = int.from_bytes(g[row * nb:(row + 1) * nb], 'big')
                 for col in range(width):
