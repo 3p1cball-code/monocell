@@ -19,6 +19,26 @@ import tty
 
 from .screen import Buffer
 
+_BLOCK = 8          # flush compares rows in blocks of this many cells
+
+
+class _Deltas(dict):
+    """(previous attr, attr) -> SGR string; misses are computed by the terminal."""
+    __slots__ = ('make',)
+
+    def __missing__(self, key):
+        v = self[key] = self.make(*key)
+        return v
+
+
+class _Tokens(dict):
+    """(previous attr, attr, char) -> SGR delta + char: one lookup per cell."""
+    __slots__ = ('deltas',)
+
+    def __missing__(self, key):
+        v = self[key] = self.deltas[(key[0], key[1])] + key[2]
+        return v
+
 
 class Key:
     __slots__ = ('key', 'char', 'orig')
@@ -385,7 +405,7 @@ class Terminal:
         self.w, self.h = self.query_size()
         self.front = None
         self.back = Buffer(self.w, self.h)
-        self.sgr_cache = {}
+        self.reset_deltas()
         self.perm = list(range(16))     # logical -> physical (linux mode)
         self.bgmap = list(range(16))    # logical bg -> logical bg allowed
         self.allowed_bg = list(range(16))
@@ -516,7 +536,7 @@ class Terminal:
     def apply_palette(self):
         """(Re)compute colour mapping and program the terminal palette if supported."""
         th = self.theme
-        self.sgr_cache = {}
+        self.reset_deltas()
         if self.mode == 'linux':
             # the theme decides it: layout[:8] are the VT's background slots, in
             # order, everything after that is text only
@@ -566,6 +586,44 @@ class Terminal:
         self.sgr_cache[a] = s
         return s
 
+    def sgr_to(self, cur, a):
+        """The shortest SGR that turns attribute cur into a (cur None: from scratch).
+
+        A full SGR on the console is '\\e[0;1;34;40m' - 12 bytes in front of a
+        1-byte character, and in a video nearly every cell changes colour. The
+        kernel parses all of it, so only what differs is sent: '\\e[34m'."""
+        return self.deltas[(cur, a)]
+
+    def _make_delta(self, cur, a):
+        if cur == a:
+            return ''
+        if cur is None or (cur >> 8) != (a >> 8) or self.mode == 'truecolor':
+            return self.sgr(a)
+        parts = []
+        if self.mode == 'linux':
+            f0, f1 = self.perm[cur & 15], self.perm[a & 15]
+            b0, b1 = self.perm[self.bgmap[(cur >> 4) & 15]], self.perm[self.bgmap[(a >> 4) & 15]]
+            if (f0 >= 8) != (f1 >= 8):
+                parts.append('1' if f1 >= 8 else '22')
+            if (f0 & 7) != (f1 & 7):
+                parts.append('3%d' % (f1 & 7))
+            if (b0 & 7) != (b1 & 7):
+                parts.append('4%d' % (b1 & 7))
+        else:
+            fg0, fg1, bg0, bg1 = cur & 15, a & 15, (cur >> 4) & 15, (a >> 4) & 15
+            if fg0 != fg1:
+                parts.append('%d' % (30 + fg1 if fg1 < 8 else 82 + fg1))
+            if bg0 != bg1:
+                parts.append('%d' % (40 + bg1 if bg1 < 8 else 92 + bg1))
+        return '\x1b[%sm' % ';'.join(parts) if parts else ''
+
+    def reset_deltas(self):
+        self.sgr_cache = {}
+        self.deltas = _Deltas()
+        self.deltas.make = self._make_delta
+        self.tokens = _Tokens()
+        self.tokens.deltas = self.deltas
+
     # ---------- output ----------
     def flush(self):
         back, w, h = self.back, self.w, self.h
@@ -576,31 +634,50 @@ class Terminal:
             front = Buffer(w, h, -1)
             out.append('\x1b[0m\x1b[2J')
         bch, bat, fch, fat = back.ch, back.at, front.ch, front.at
-        sgr = self.sgr
+        tokens = self.tokens
+        if len(tokens) > 65536:
+            tokens.clear()
+        get = tokens.__getitem__
+        B = _BLOCK
+        blocks = range(0, w, B)
+        # A video frame changes nearly every cell, so nothing here runs Python code
+        # per cell: rows are compared in blocks of 8 cells (slice compares, in C),
+        # runs of changed blocks are trimmed to the first/last changed cell, an
+        # unchanged block in between is jumped over with a cursor move, and each
+        # span goes out as one join over (prev attr, attr, char) -> SGR delta + char
         for y in range(h):
             bc, ba, fc, fa = bch[y], bat[y], fch[y], fat[y]
             if bc == fc and ba == fa:
                 continue
-            x = 0
-            while x < w:
-                if bc[x] == fc[x] and ba[x] == fa[x]:
-                    x += 1
+            changed = [bc[i:i + B] != fc[i:i + B] or ba[i:i + B] != fa[i:i + B] for i in blocks]
+            i = 0
+            nb = len(changed)
+            while i < nb:
+                if not changed[i]:
+                    i += 1
                     continue
-                out.append('\x1b[%d;%dH' % (y + 1, x + 1))
-                while x < w:
-                    if bc[x] == fc[x] and ba[x] == fa[x]:
-                        # look ahead: bridge small unchanged gaps
-                        j = x + 1
-                        while j < w and j < x + 5 and bc[j] == fc[j] and ba[j] == fa[j]:
-                            j += 1
-                        if j >= w or j >= x + 5:
-                            break
-                    a = ba[x]
+                j = i
+                while j < nb and changed[j]:
+                    j += 1
+                s0, s1 = i * B, min(w, j * B)
+                while bc[s0] == fc[s0] and ba[s0] == fa[s0]:
+                    s0 += 1
+                while bc[s1 - 1] == fc[s1 - 1] and ba[s1 - 1] == fa[s1 - 1]:
+                    s1 -= 1
+                out.append('\x1b[%d;%dH' % (y + 1, s0 + 1))
+                ats = ba[s0:s1]
+                a = ats[0]
+                if ats.count(a) == len(ats):       # one colour (text, mono video)
                     if a != cur:
-                        out.append(sgr(a))
+                        out.append(self.deltas[(cur, a)])
                         cur = a
-                    out.append(bc[x])
-                    x += 1
+                    out.append(''.join(bc[s0:s1]))
+                else:
+                    prev = [cur]
+                    prev += ats
+                    out.append(''.join(map(get, zip(prev, ats, bc[s0:s1]))))
+                    cur = ats[-1]
+                i = j
             fc[:] = bc
             fa[:] = ba
         if self.cursor:

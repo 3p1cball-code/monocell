@@ -374,6 +374,9 @@ class Renderer:
         k = (r >> 2, g >> 2, b >> 2, allowed is not None)
         v = self.near.get(k)
         if v is None:
+            # decided for the middle of the 4x4x4 bucket, not for whichever colour
+            # came first - the same answer every time (and the same as nearest_lut)
+            r, g, b = (k[0] << 2) + 2, (k[1] << 2) + 2, (k[2] << 2) + 2
             best, bd = 0, 1 << 30
             for i in (allowed if allowed is not None else range(16)):
                 pr, pg, pb = self.rgb[i]
@@ -435,6 +438,120 @@ class Renderer:
             best = (allowed[0], allowed[0], ' ')
         self.blend[q] = best
         return best
+
+    # ---------------------------------------------------------- numpy tables
+    def nearest_lut(self, np, allowed=None):
+        """uint8[64*64*64]: nearest() for every 6-bit colour bucket, built once."""
+        key = 'lut_all' if allowed is None else 'lut_allowed'
+        lut = getattr(self, key, None)
+        if lut is None:
+            idx = list(allowed if allowed is not None else range(16))
+            pal = np.array([self.rgb[i] for i in idx], dtype=np.int32)
+            k = np.arange(64, dtype=np.int32) * 4 + 2
+            lut = np.empty(64 * 64 * 64, dtype=np.uint8)
+            for r6 in range(64):           # one plane at a time: 4096 x len(pal)
+                r = k[r6]
+                g = np.repeat(k, 64)
+                b = np.tile(k, 64)
+                d = ((r - pal[:, 0]) ** 2 * 3)[None, :] + \
+                    (g[:, None] - pal[None, :, 1]) ** 2 * 4 + \
+                    (b[:, None] - pal[None, :, 2]) ** 2 * 2
+                lut[r6 * 4096:(r6 + 1) * 4096] = np.array(idx, dtype=np.uint8)[d.argmin(axis=1)]
+            setattr(self, key, lut)
+        return lut
+
+    def blend_lut(self, np, keys):
+        """(attr int32[4096], char codes int32[4096]) of blend_cell for the 12-bit
+        keys r<<8|g<<4|b; filled lazily for the keys a frame actually uses."""
+        if getattr(self, 'blut', None) is None:
+            self.blut = np.full(4096, -1, dtype=np.int32)
+            self.bchr = np.zeros(4096, dtype=np.int32)
+        need = np.unique(keys)
+        need = need[self.blut[need] < 0]
+        for q in need.tolist():
+            bg, fg, ch = self.blend_cell((q >> 8, (q >> 4) & 15, q & 15))
+            self.blut[q] = fg | (bg << 4)
+            self.bchr[q] = ord(ch)
+        return self.blut, self.bchr
+
+
+# ------------------------------------------------------------------ numpy fast paths
+# The per-cell loops below cost ~40 ms per frame for 204x109 cells on a Core 2 Duo
+# (the X61s with the minimal-cell font); the same maths on whole arrays is a few ms.
+# numpy is optional - without it the pure-python loops run. MONOCELL_NO_NUMPY=1
+# forces them (tests compare both).
+_np = None
+
+
+def numpy():
+    global _np
+    if _np is None:
+        import os
+        _np = False
+        if not os.environ.get('MONOCELL_NO_NUMPY'):
+            try:
+                import numpy as np
+                _np = np
+            except ImportError:
+                pass
+    return _np or None
+
+
+def _rows_np(np, chars, attrs, w, h):
+    """int arrays (h, w) of code points / attrs -> list of (str, list) rows."""
+    flat = attrs.reshape(-1).tolist()
+    if chars is None:
+        blank = ' ' * w
+        return [(blank, flat[y * w:(y + 1) * w]) for y in range(h)]
+    if int(chars.max(initial=0)) < 128:
+        text = chars.astype(np.uint8).tobytes().decode('ascii')
+    else:
+        text = chars.astype('<u4').tobytes().decode('utf-32-le')
+    return [(text[y * w:(y + 1) * w], flat[y * w:(y + 1) * w]) for y in range(h)]
+
+
+def _planes_np(np, rgb, w, h):
+    a = np.frombuffer(rgb, dtype=np.uint8, count=w * h * 3).reshape(h, w, 3).astype(np.int32)
+    return a[:, :, 0], a[:, :, 1], a[:, :, 2]
+
+
+def _offsets_np(np, dither, w, h, spread):
+    mat, n = _bayer(dither)
+    m = np.array(mat, dtype=np.float64) * spread
+    return np.tile(m, ((h + n - 1) // n, (w + n - 1) // n))[:h, :w]
+
+
+def _render_ascii_np(np, R, rgb, w, h, mode, th, ramp):
+    r, g, b = _planes_np(np, rgb, w, h)
+    lum = (r * 299 + g * 587 + b * 114) // 1000
+    nr = len(ramp) - 1
+    codes = np.array([ord(c) for c in ramp], dtype=np.int32)[lum * nr // 255]
+    bg = th.r['shadow']
+    if mode == 'mono':
+        fg = np.full((h, w), th.r['accent'], dtype=np.int32)
+    else:
+        m = np.maximum(np.maximum(np.maximum(r, g), b), 1)
+        lut = R.nearest_lut(np, R.allowed_bg if R.strict else None)
+        k = (((r * 255 // m) >> 2) << 12) | (((g * 255 // m) >> 2) << 6) | ((b * 255 // m) >> 2)
+        fg = lut[k].astype(np.int32)
+    return _rows_np(np, codes, fg | (bg << 4), w, h)
+
+
+def _render_blend_np(np, R, rgb, w, h, dither):
+    r, g, b = _planes_np(np, rgb, w, h)
+    t = _offsets_np(np, dither, w, h, 18)
+    q = [(np.clip(np.floor(c + t), 0, 255).astype(np.int32) >> 4) for c in (r, g, b)]
+    keys = (q[0] << 8) | (q[1] << 4) | q[2]
+    attr, chars = R.blend_lut(np, keys)
+    return _rows_np(np, chars[keys], attr[keys], w, h)
+
+
+def _render_pixel_np(np, R, rgb, w, h, dither):
+    r, g, b = _planes_np(np, rgb, w, h)
+    t = _offsets_np(np, dither, w, h, 56)
+    q = [(np.clip(np.trunc(c + t), 0, 255).astype(np.int32) >> 2) for c in (r, g, b)]
+    i = R.nearest_lut(np, R.allowed_bg)[(q[0] << 12) | (q[1] << 6) | q[2]].astype(np.int32)
+    return _rows_np(np, None, i | (i << 4), w, h)
 
 
 _renderer = None
@@ -534,11 +651,28 @@ def render(wm, rgb, w, h, mode=None, dither=None, dim=1.0, grey=False):
         rgb = bytes(int(v * dim) for v in rgb)
     if mode == 'ink':
         return render_ink(wm, rgb, w, h, dither)
+    np = numpy() if w * h >= 256 else None
     if mode == 'pixel':
+        if np is not None and dither != 'fs':
+            return _render_pixel_np(np, R, rgb, w, h, dither)
         return _render_pixel(R, rgb, w, h, dither)
     if mode in ('ascii', 'mono'):
-        return _render_ascii(R, rgb, w, h, mode, wm.theme, wm.cfg.get('ascii_charset', 'full'))
+        charset = wm.cfg.get('ascii_charset', 'full')
+        if np is not None:
+            return _render_ascii_np(np, R, rgb, w, h, mode, wm.theme, _ramp(charset))
+        return _render_ascii(R, rgb, w, h, mode, wm.theme, charset)
+    if np is not None:                   # blend has no error diffusion: fs = none
+        return _render_blend_np(np, R, rgb, w, h, dither)
     return _render_blend(R, rgb, w, h, dither)
+
+
+def _ramp(charset):
+    if charset == 'simple':
+        return ASCII_RAMP
+    if charset == 'shades':
+        from . import util
+        return ASCII_SHADES if util.UNICODE else ASCII_FULL
+    return ASCII_FULL
 
 
 def render_ink(wm, rgb, w, h, dither=None, ink=None, paper=None, charset=None):
@@ -653,12 +787,7 @@ def _render_pixel(R, rgb, w, h, dither):
 
 def _render_ascii(R, rgb, w, h, mode, th, charset='full'):
     bg = th.r['shadow']
-    if charset == 'simple':
-        ramp = ASCII_RAMP
-    elif charset == 'shades':
-        ramp = ASCII_SHADES if __import__('monocell.util', fromlist=['UNICODE']).UNICODE else ASCII_FULL
-    else:
-        ramp = ASCII_FULL
+    ramp = _ramp(charset)
     nr = len(ramp) - 1
     rows = []
     o = 0
