@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Famagic** app: shared family task and shopping lists through the separate
+  [famagic-sync](https://github.com/3p1cball-code/famagic-sync) bridge on VEGA. List
+  tabs, person filter (ignored for private lists), due dates with a calendar, series
+  with "done until the next date", a collapsible done section, shopping lists, private
+  lists without assignees and an offline-capable sync (VEGA queues writes when the
+  internet is down). The Famagic word in the desktop widget is grey; "Serie" in the
+  list is blue.
+- **Famagic desktop widget**: bottom-right task box with time range, person and
+  per-list switches (Settings → Famagic), wrapping titles, 45 s refresh and a
+  click-to-open. Online is green, "VEGA reachable but no internet" orange, VEGA
+  unreachable red.
+- **Settings**: the overloaded Desktop page is split into Windows, Desktop,
+  Background, Famagic and System.
 - The X61s session (`monocell-session`, `.profile` autostart, deploy scripts) no longer
   runs `monocell --lowmem`: shadows on, video at the configured frame rate. The switch
   itself still exists and now only turns shadows off.

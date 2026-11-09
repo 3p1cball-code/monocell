@@ -260,6 +260,13 @@ monocell-clip --clear
   geheime iCal-Adresse (inkl. einfacher Wiederholungsregeln; Einstellungen → Calendar;
   Aktualisierung alle 20 Minuten). Anzeigen nur – Termine werden in Google selbst
   angelegt, in Monocell gibt es weder lokale Einträge noch Löschen.
+* **Famagic** – shared family tasks and shopping lists via the self-hosted
+  [famagic-sync](https://github.com/3p1cball-code/famagic-sync) bridge: list tabs,
+  real-time-ish refresh, person filter, due dates with a calendar, series ("done
+  until the next date"), a collapsible done section, shopping lists and private
+  lists without assignees. A small bottom-right desktop widget (Settings → Famagic)
+  shows due tasks with time range, person and per-list switches; long titles wrap.
+  Needs the service on the LAN (VEGA).
 * **Bilder** – fünf Darstellungen: `blend` (zwei Palettenfarben pro Zelle mit
   Dichtezeichen `.:+*%#@`), `pixel` (ein geordnet geditherter Pixel pro Zelle), `grey`,
   `ascii`, `mono`; Zoom, Pan, Blättern (auch per Pfeiltasten), Vollbild. **Vollbild** (`f`

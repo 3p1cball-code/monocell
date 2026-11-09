@@ -323,6 +323,10 @@ DEFAULT_CONFIG = {
     'startup_sound': 'win95',      # id from monocell.startup; '' = off (file optional)
     'media_prompt': False,        # ask before mounting a newly plugged-in medium (off: Files only)
     'battery_suspend': True,      # at 3% on battery: suspend (a toast announces it)
+    'famagic_widget': True,       # small Famagic task box on the desktop
+    'famagic_range': 'week',      # week | today | 7 | 14 | 30 | all
+    'famagic_member': '*',        # '*' = all, 'none' = unassigned, otherwise family member id
+    'famagic_lists': None,        # None/'*' = all lists, [] = none, otherwise list ids
     'wallpaper': '',
     'files_dir': '',              # Files: the folder it was last in
     'background': 'auto',         # auto | logo | plain | image | matrix

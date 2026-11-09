@@ -153,6 +153,7 @@ REGISTRY = [
     ('calc', 'calc', 'Calculator', '[+]', 'Calculator', 'Office'),
     ('calendar', 'calendar', 'Calendar', '[31', 'Calendar', 'Office'),
     ('mail', 'mail', 'Mail', '[M]', 'IMAP/SMTP mail', 'Office'),
+    ('famagic', 'famagic', 'Famagic', '[F]', 'Familienliste (Vega-Sync)', 'Office'),
     ('viewer', 'viewer', 'Pictures', '[*]', 'Image viewer', 'Media'),
     ('video', 'video', 'Video', '[>]', 'Video player', 'Media'),
     ('maps', 'maps', 'Maps', '[m]', 'OpenStreetMap in graphics mode', 'Media'),

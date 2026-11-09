@@ -10,12 +10,13 @@ import traceback
 
 from . import clipboard as clip
 from . import clock
+from . import famagic_widget
 from . import hardware
 from . import media
 from .app import REGISTRY, load_app
 from .screen import Canvas
 from .term import Key, Mouse, Paste
-from .util import fit, human_size, log, sym
+from .util import fit, human_size, log, sym, wrap_text
 from .widgets import Dialog, Menu, MenuItem, TextField, scrollbar
 
 DOUBLE_CLICK = 0.4
@@ -788,6 +789,33 @@ class WM:
         self.media_new = set()             # freshly seen, still unmounted, not asked yet
         loop.every(4.0, self.poll_media)
         loop.call_later(1.5, self.poll_media)   # a medium that is already plugged in
+        self.famagic_rect = None
+        self.famagic_busy = False
+        loop.every(45.0, self.poll_famagic_widget)
+        loop.call_later(2.0, self.poll_famagic_widget)
+
+    def poll_famagic_widget(self, force=False):
+        if self.famagic_busy:
+            return
+        now = time.monotonic()
+        if not force and now - famagic_widget.fetched_at() < 30:
+            return
+        self.famagic_busy = True
+
+        def work():
+            return famagic_widget.fetch()
+
+        def done(snap):
+            self.famagic_busy = False
+            famagic_widget.set_snapshot(snap)
+            self.dirty = True
+
+        def bad(e):
+            self.famagic_busy = False
+            famagic_widget.set_error(e)
+            self.dirty = True
+
+        self.loop.run_in_thread(work, done, bad)
 
     # ---------------------------------------------------------- removable media
     def poll_media(self):
@@ -1975,15 +2003,11 @@ class WM:
         if mode == 'image' and self.wallpaper_cells:
             cells, ww, wh = self.wallpaper_cells
             cv.sub(0, self.desk_y, self.w, self.desk_h).blit_cells(0, 0, cells)
-            return
-        if mode == 'matrix':
+        elif mode == 'matrix':
             if self.rain is None:
                 self.rain = Rain(self.w, max(1, self.desk_h))
             self.rain.draw(cv, self.desk_y, th)
-            return
-        if mode != 'logo':
-            return
-        if self.cfg['desktop_logo'] and self.desk_h > 12 and self.w > 44:
+        elif mode == 'logo' and self.cfg['desktop_logo'] and self.desk_h > 12 and self.w > 44:
             from . import logo
             ww, hh, _sx = logo.measure_for(self.w)
             x = (self.w - ww) // 2
@@ -1991,6 +2015,79 @@ class WM:
             logo.draw(cv, x, y, th)
             sub = 'right-click the desktop for more'
             cv.put((self.w - len(sub)) // 2, y + hh + 2, sub, th.c('dim', 'desk'))
+        self.draw_famagic_widget(cv)
+
+    def draw_famagic_widget(self, cv):
+        self.famagic_rect = None
+        if self.gfx or not self.cfg.get('famagic_widget', True):
+            return
+        th = self.theme
+        snap = famagic_widget.snapshot()
+        err = famagic_widget.error()
+        tasks = famagic_widget.filter_tasks(
+            snap, self.cfg.get('famagic_range', 'week'),
+            self.cfg.get('famagic_member', '*'), 5,
+            list_ids=self.cfg.get('famagic_lists')) if snap else []
+        width = min(46, max(20, self.w - 2))
+        title_w = max(4, width - 17)
+        max_lines = max(1, self.desk_h - 3)
+        shown = []
+        total = 0
+        for t in tasks:
+            lines = wrap_text(t.get('title') or '', title_w) or ['']
+            if total + len(lines) > max_lines:
+                if not shown:
+                    shown.append((t, lines[:max_lines]))
+                    total = max_lines
+                break
+            shown.append((t, lines))
+            total += len(lines)
+        omitted = max(0, len(tasks) - len(shown))
+        if not tasks:
+            total = 1
+        h = 2 + max(1, total)
+        x = self.w - width - 1
+        y = self.desk_y + self.desk_h - h - 1
+        if x < 0 or y < self.desk_y:
+            return
+        cv.fill(x, y, width, h, th.c('text', 'win'))
+        cv.put(x + 1, y, fit('Famagic', width - 12), th.c('text', 'win', 1))
+        state = famagic_widget.status(snap, err)
+        if state == 'offline':
+            label, col = 'offline', 'red'
+        elif state == 'online-offline':
+            label, col = 'online', 'yellow'
+        elif state == 'online':
+            label, col = 'online', 'green'
+        else:
+            label, col = 'lade ...', 'dim'
+        cv.put(x + width - len(label) - 1, y, label, th.c(col, 'win'))
+        cy = y + 1
+        if err and not snap:
+            cv.put(x + 1, cy, fit('VEGA nicht erreichbar', width - 2), th.c('red', 'win'))
+        elif not snap:
+            cv.put(x + 1, cy, 'lade ...', th.c('dim', 'win'))
+        elif not tasks:
+            cv.put(x + 1, cy, fit('keine fälligen Aufgaben', width - 2), th.c('dim', 'win'))
+        else:
+            for t, lines in shown:
+                due = famagic_widget.due_text(t)
+                overdue = 'überfällig' in due
+                cv.put(x + 1, cy, fit(due, 14), th.c('red' if overdue else 'accent', 'win'))
+                cv.put(x + 16, cy, fit(lines[0] if lines else '', title_w), th.c('text', 'win'))
+                cy += 1
+                for ln in lines[1:]:
+                    cv.put(x + 16, cy, fit(ln, title_w), th.c('text', 'win'))
+                    cy += 1
+        pending = int((snap or {}).get('pending') or 0)
+        if pending:
+            foot = '%d warten' % pending
+        elif omitted:
+            foot = '+%d · click to open' % omitted
+        else:
+            foot = 'click to open'
+        cv.put(x + 1, y + h - 1, fit(foot, width - 2), th.c('yellow' if pending else 'dim', 'win'))
+        self.famagic_rect = (x, y, width, h)
 
     def win_buttons(self, win):
         """Return list of (part, x0, x1) for the title buttons (absolute x)."""
@@ -2474,6 +2571,11 @@ class WM:
             return
         win = self.window_at(mx, my)
         if win is None:
+            if ev.kind == 'down' and ev.button == 0 and self.famagic_rect:
+                fx, fy, fw, fh = self.famagic_rect
+                if fx <= mx < fx + fw and fy <= my < fy + fh:
+                    self.open('famagic')
+                    return
             if self.hover_part is not None:
                 self.hover_part = None
                 self.dirty = True

@@ -7,28 +7,38 @@ from ..util import fit
 from ..widgets import MenuItem, TextField, button
 from .appearance import AppearanceMixin
 
-SECTIONS = [('colors', 'Appearance'), ('desktop', 'Desktop'), ('background', 'Background'),
+SECTIONS = [('colors', 'Appearance'), ('windows', 'Windows'), ('desktop', 'Desktop'),
+            ('background', 'Background'), ('famagic', 'Famagic'),
             ('media', 'Images & video'), ('sounds', 'Sounds'), ('maps', 'Maps'), ('web', 'Web'),
-            ('calendar', 'Calendar'), ('tools', 'Tools'),
+            ('calendar', 'Calendar'), ('tools', 'Tools'), ('system', 'System'),
             ('about', 'About')]
 
 
 OPTIONS = {
-    'desktop': [
+    'windows': [
         ('taskbar', 'Taskbar position', ['bottom', 'top']),
         ('frame', 'Window frames', ['flat', 'lines']),
         ('shadows', 'Window shadows', [False, True]),
         ('clock_24h', '24 hour clock', [False, True]),
         ('clock_seconds', 'Clock shows seconds', [False, True]),
+    ],
+    'desktop': [
         ('desktop_logo', 'Desktop logo', [False, True]),
+        ('wallpaper', 'Wallpaper image', 'file'),
         ('thinklight', 'ThinkLight cone', [True, False]),
         ('thinklight_size', 'Cone size', ['tiny', 'mini', 'small', 'medium', 'large']),
-        ('media_prompt', 'Ask to mount removable media', [True, False]),
-        ('battery_suspend', 'Suspend when the battery is critical (3%)', [True, False]),
-        ('wallpaper', 'Wallpaper image', 'file'),
         ('symbols', 'Symbols (single-width unicode)', ['auto', 'on', 'off']),
         ('strict_ascii', 'Strict ASCII (transliterate umlauts etc.)', [False, True]),
         ('color_mode', 'Colour output (restart)', ['auto', 'truecolor', 'palette', 'linux', 'ansi']),
+    ],
+    'famagic': [
+        ('famagic_widget', 'Show Famagic entries', [True, False]),
+        ('famagic_range', 'Time range', ['week', 'today', '7', '14', '30', 'all']),
+        ('famagic_member', 'Person', 'famagic_member'),
+    ],
+    'system': [
+        ('media_prompt', 'Ask to mount removable media', [True, False]),
+        ('battery_suspend', 'Suspend when the battery is critical (3%)', [True, False]),
     ],
     'background': [
         ('background', 'Background', ['auto', 'logo', 'plain', 'image', 'matrix']),
@@ -289,13 +299,23 @@ class Settings(AppearanceMixin, App):
             self.zone_off = (0, 0)
 
     def options(self):
-        return OPTIONS.get(self.section, [])
+        rows = list(OPTIONS.get(self.section, []))
+        if self.section == 'famagic':
+            from .. import famagic_widget
+            snap = famagic_widget.snapshot()
+            if snap:
+                for l in snap.get('lists', []):
+                    if not l.get('archived_at'):
+                        rows.append(('famagic_list:' + l.get('id'), l.get('title') or '?', 'famagic_list'))
+        return rows
 
     def draw_options(self, cv, focused):
         th = self.th
         title = dict(SECTIONS)[self.section]
         cv.put(0, 0, title, th.c('bright', 'win', 1))
         y = 2
+        if self.section == 'famagic':
+            self.wm.poll_famagic_widget()
         lw = min(40, max(len(o[1]) for o in self.options()) + 2)
         for i, (key, label, kind) in enumerate(self.options()):
             on = i == self.opt_sel and focused
@@ -308,9 +328,29 @@ class Settings(AppearanceMixin, App):
                 s = 'on' if val is True else 'off' if val is False else str(val)
                 if key == 'cell_aspect' and not val:
                     s = 'auto (%.2f)' % self.wm.term.cell_aspect
+                if key == 'famagic_range':
+                    from .. import famagic_widget
+                    s = famagic_widget.RANGE_LABELS.get(val, s)
                 a = th.c('on_accent', 'accent') if hov or on else th.c('accent', 'raised')
                 cv.put(vx, y, ' < %s > ' % s, a)
                 self.zone(vx, y, len(s) + 6, 1, ('opt', key))
+            elif kind == 'famagic_member':
+                from .. import famagic_widget
+                val = self.cfg.get(key, '*')
+                name = dict(famagic_widget.member_options()).get(val, 'all')
+                s = ' < %s > ' % name
+                a = th.c('on_accent', 'accent') if hov or on else th.c('accent', 'raised')
+                cv.put(vx, y, s, a)
+                self.zone(vx, y, len(s), 1, ('opt', key))
+            elif kind == 'famagic_list':
+                from .. import famagic_widget
+                snap = famagic_widget.snapshot()
+                ids = famagic_widget.selected_list_ids(snap, self.cfg.get('famagic_lists'))
+                lid = key.split(':', 1)[1]
+                s = ' < %s > ' % ('on' if lid in ids else 'off')
+                a = th.c('on_accent', 'accent') if hov or on else th.c('accent', 'raised')
+                cv.put(vx, y, s, a)
+                self.zone(vx, y, len(s), 1, ('opt', key))
             elif kind == 'action':
                 a = th.c('on_accent', 'accent') if hov else th.c('accent', 'raised')
                 cv.put(vx, y, ' [ %s ] ' % label, a)
@@ -337,6 +377,24 @@ class Settings(AppearanceMixin, App):
                 cv.put(lw, y, fit(MODE_HELP.get(self.cfg['image_mode'], ''), cv.w - lw), th.c('dim', 'win'))
                 y += 1
         y += 1
+        if self.section == 'famagic':
+            from ..util import wrap_text
+            txt = ('Kleines Aufgabenfeld unten rechts auf dem Desktop. Zeitraum und Person '
+                   'gelten nur fuer dieses Widget; die Famagic-App selbst hat eigene Filter. '
+                   'Klick auf das Widget oeffnet die Famagic-App. Ist VEGA erreichbar, aber '
+                   'ohne Internet, steht dort "online" in Orange; ohne VEGA rot. '
+                   'Unter den Listen lassen sich die Listen einzeln an- und abwaehlen, die im '
+                   'Widget erscheinen; sind alle aus, erscheint nichts.')
+            for i, ln in enumerate(wrap_text(txt, cv.w)):
+                if y + i < cv.h:
+                    cv.put(0, y + i, ln, th.c('dim', 'win'))
+        if self.section == 'desktop':
+            from ..util import wrap_text
+            txt = ('Wallpaper, logo, ThinkLight and console symbols. Window and taskbar '
+                   'behaviour lives under Windows; the Famagic task box under Famagic.')
+            for i, ln in enumerate(wrap_text(txt, cv.w)):
+                if y + i < cv.h:
+                    cv.put(0, y + i, ln, th.c('dim', 'win'))
         if self.section == 'background':
             from ..util import wrap_text
             txt = ('The animated rain is visible when Background is "matrix" (or "auto" with '
@@ -507,6 +565,36 @@ class Settings(AppearanceMixin, App):
                     i = kind.index(cur) if cur in kind else -1
                     self.cfg[k] = kind[(i + d) % len(kind)]
                     self.apply_sound() if k == 'audio_sink' else self.apply()
+                elif kind == 'famagic_member':
+                    from .. import famagic_widget
+                    opts = famagic_widget.member_options()
+                    vals = [k for k, _ in opts]
+                    cur = self.cfg.get(k, '*')
+                    i = vals.index(cur) if cur in vals else 0
+                    self.cfg[k] = vals[(i + d) % len(vals)]
+                    self.cfg.save()
+                    self.wm.poll_famagic_widget(force=True)
+                    self.wm.dirty = True
+                    self.invalidate()
+                    return
+                elif kind == 'famagic_list':
+                    from .. import famagic_widget
+                    snap = famagic_widget.snapshot()
+                    ids = famagic_widget.selected_list_ids(snap, self.cfg.get('famagic_lists'))
+                    lid = k.split(':', 1)[1]
+                    if lid in ids:
+                        ids.discard(lid)
+                    else:
+                        ids.add(lid)
+                    all_ids = famagic_widget.selected_list_ids(snap, None)
+                    if ids == all_ids:
+                        self.cfg['famagic_lists'] = None
+                    else:
+                        self.cfg['famagic_lists'] = sorted(ids)
+                    self.cfg.save()
+                    self.wm.dirty = True
+                    self.invalidate()
+                    return
                 elif kind == 'file':
                     def ok(path, k=k):
                         self.cfg[k] = path
