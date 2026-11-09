@@ -21,6 +21,8 @@ OPTIONS = {
         ('clock_24h', '24 hour clock', [False, True]),
         ('clock_seconds', 'Clock shows seconds', [False, True]),
         ('desktop_logo', 'Desktop logo', [False, True]),
+        ('thinklight', 'ThinkLight cone', [True, False]),
+        ('thinklight_size', 'Cone size', ['tiny', 'mini', 'small', 'medium', 'large']),
         ('media_prompt', 'Ask to mount removable media', [True, False]),
         ('battery_suspend', 'Suspend when the battery is critical (3%)', [True, False]),
         ('wallpaper', 'Wallpaper image', 'file'),

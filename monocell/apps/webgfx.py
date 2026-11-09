@@ -585,14 +585,15 @@ class WebGfx:
         return x, y
 
     def move_pointer(self, x, y):
+        """Move the arrow; returns where its tip really is (snapped to the grid)."""
         if not self.sess or self.base is None:
             self.px, self.py = x, y
-            return
+            return x, y
         frame = self.sess.frame
         if frame is None or len(frame) != len(self.base):
             self.px, self.py = x, y
             self.show()
-            return
+            return self.drawn_ptr or (x, y)
         size, x0, y0 = self.pointer_origin()
         W, H = self.sess.screen
         ox, oy = self.drawn_ptr or (int(self.px), int(self.py))
@@ -601,12 +602,13 @@ class WebGfx:
         nx = snap_to(int(x), x0, size, W - POINTER_W * size)
         ny = snap_to(int(y), y0, size, H - POINTER_H * size)
         if (nx, ny) == (ox, oy):
-            return
+            return nx, ny
         for yy in range(oy, min(H, oy + POINTER_H * size)):  # erase the old one
             frame[yy * st:(yy + 1) * st] = self.base[yy * st:(yy + 1) * st]
         self.drawn_ptr = self.draw_pointer(frame, nx, ny)
         lo, hi = min(oy, ny), max(oy, ny) + POINTER_H * size
         self.sess.paint_rows(lo, min(H, hi))
+        return self.drawn_ptr
 
     def idle(self):
         """Called twice a second: OSD timeouts, VT switches, the loading spinner."""
@@ -630,7 +632,7 @@ class WebGfx:
         if not self.sess:
             return True
         x, y = to_screen(ev.x, ev.y, term.w, term.h, self.sess.screen)
-        self.move_pointer(x, y)
+        x, y = self.move_pointer(x, y)         # the drawn arrow tip, not the raw cell
         H = self.sess.screen[1]
         on_bar = y >= H - HUD_H
         page = self.page

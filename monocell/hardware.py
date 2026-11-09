@@ -9,6 +9,7 @@ from .util import which
 
 BACKLIGHT = '/sys/class/backlight'
 POWER_SUPPLY = '/sys/class/power_supply'
+DRM = '/sys/class/drm'
 
 
 def run(argv, timeout=5):
@@ -52,6 +53,34 @@ def brightness_percent():
         return None
     _, cur, top = b
     return int(round(100.0 * cur / top))
+
+
+def panel_size_cm(drm=DRM):
+    """Physical size of the built-in panel from EDID, (width, height) in cm."""
+    if drm == DRM:
+        fake = os.environ.get('MONOCELL_FAKE_PANEL_CM')
+        if fake:
+            try:
+                w, h = (float(v) for v in fake.lower().replace('x', ',').split(','))
+                return w, h
+            except ValueError:
+                pass
+    try:
+        names = sorted(os.listdir(drm))
+    except OSError:
+        return None
+    builtin = [n for n in names if any(k in n for k in ('-LVDS-', '-eDP-', '-DSI-'))]
+    order = builtin + [n for n in names if n not in builtin]
+    for name in order:
+        try:
+            with open(os.path.join(drm, name, 'edid'), 'rb') as f:
+                data = f.read(24)
+        except OSError:
+            continue
+        if (len(data) >= 23 and data[:8] == b'\x00\xff\xff\xff\xff\xff\xff\x00'
+                and data[21] and data[22]):
+            return data[21], data[22]
+    return None
 
 
 def _session_path():

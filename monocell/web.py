@@ -903,24 +903,20 @@ class Page:
         self._metrics()
 
     def _metrics(self):
-        """Viewport for the current zoom.
+        """Viewport for the current zoom: always screen / zoom, page scale 1.
 
-        Zooming in is the browser's page scale (pinch): the layout stays as it is,
-        the picture is magnified and stays sharp (the screencast keeps the full
-        device resolution); the wheel pans it. Zooming out needs a wider CSS
-        viewport (a page scale below 1 is not allowed) - the frames then come a
-        bit larger and are scaled down by the caller."""
+        Zooming is done by narrowing (or widening) the layout viewport, never with
+        Emulation.setPageScaleFactor: the screencast keeps sending the layout
+        viewport, so a page scale above 1 magnified nothing on screen - it only
+        moved the input, and clicks landed up and left of the pointer. A narrower
+        viewport really magnifies the page (it reflows, like browser zoom), and the
+        caller maps pointer pixels to CSS pixels as x / zoom either way."""
         z = self.zoom
-        if z < 1.0:
-            self.call('Emulation.setPageScaleFactor', {'pageScaleFactor': 1})
-            w, h = max(1, int(round(self.size[0] / z))), max(1, int(round(self.size[1] / z)))
-            self.call('Emulation.setDeviceMetricsOverride',
-                      {'width': w, 'height': h, 'deviceScaleFactor': 1, 'mobile': False})
-        else:
-            self.call('Emulation.setDeviceMetricsOverride',
-                      {'width': self.size[0], 'height': self.size[1],
-                       'deviceScaleFactor': 1, 'mobile': False})
-            self.call('Emulation.setPageScaleFactor', {'pageScaleFactor': z})
+        w = max(1, int(round(self.size[0] / z)))
+        h = max(1, int(round(self.size[1] / z)))
+        self.call('Emulation.setPageScaleFactor', {'pageScaleFactor': 1})
+        self.call('Emulation.setDeviceMetricsOverride',
+                  {'width': w, 'height': h, 'deviceScaleFactor': 1, 'mobile': False})
 
     def set_zoom(self, z):
         z = max(0.5, min(3.0, float(z)))
@@ -932,10 +928,7 @@ class Page:
             self.start_screencast(80, *self.cast)     # the frame size changed
 
     def css_size(self):
-        """The area input coordinates refer to, in CSS pixels.
-
-        Zoomed in, that is the visual viewport (the layout keeps its width, the page
-        scale magnifies it); zoomed out, the wider CSS viewport."""
+        """The area input coordinates refer to, in CSS pixels (screen / zoom)."""
         z = self.zoom
         return max(1, int(round(self.size[0] / z))), max(1, int(round(self.size[1] / z)))
 

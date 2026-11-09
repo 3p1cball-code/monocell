@@ -1,5 +1,6 @@
 """Window manager: windows, z-order, drag/resize/snap, taskbar, start menu, toasts, dialogs."""
 import base64
+import glob
 import os
 import random
 import socket
@@ -754,6 +755,9 @@ class WM:
         self.battery_time = None
         self._batt_level = None
         self._batt_suspending = False
+        self.thinklight = False
+        self.thinklight_led = self.find_thinklight()
+        self.panel_cm = hardware.panel_size_cm()
         self.last_frame = 0.0
         self.bar_zones = []
         self.cascade_n = 0
@@ -763,6 +767,7 @@ class WM:
         loop.every(1.0, self.tick)
         loop.every(30.0, self.read_battery)
         self.read_battery()
+        loop.every(0.25, self.poll_thinklight)
         self.net = None
         self.net_signal = None
         self.bt = None
@@ -1838,6 +1843,7 @@ class WM:
         buf = self.term.back
         cv = Canvas(buf)
         self.draw_desktop(cv)
+        self.draw_thinklight(cv)
         for win in self.windows:
             if win.minimized:
                 continue
@@ -1868,6 +1874,99 @@ class WM:
                 cur = th.r['cursor']
                 cv.set_attr(mx, my, 1, 1, th.c(th.contrast(cur), cur))
         self.term.flush()
+
+    # ---------------------------------------------------------- ThinkLight
+    # The lamp sits in the lid above the screen, so its cone hangs at the top
+    # edge, a few cells in from the left - big enough to notice, small enough
+    # to leave the desktop. The size is a setting (Settings -> Desktop).
+    THINKLIGHT_CONES = {
+        'tiny': (
+            ' * ',
+            '/|\\',
+        ),
+        'mini': (
+            '  *  ',
+            ' /|\\ ',
+            '. | .',
+        ),
+        'small': (
+            '   *   ',
+            '  /|\\  ',
+            ' / | \\ ',
+            '.  |  .',
+        ),
+        'medium': (
+            '    *    ',
+            '   /|\\   ',
+            '  / | \\  ',
+            ' /  |  \\ ',
+            '.   |   .',
+        ),
+        'large': (
+            '      *      ',
+            '     /|\\     ',
+            '    / | \\    ',
+            '   /  |  \\   ',
+            '  /   |   \\  ',
+            ' /    |    \\ ',
+            '.     |     .',
+        ),
+    }
+
+    def find_thinklight(self):
+        """Path of the lid lamp's LED, if this machine has one."""
+        fake = os.environ.get('MONOCELL_FAKE_THINKLIGHT')
+        if fake is not None:
+            return fake or None         # tests and snapshots point this at a file
+        leds = sorted(glob.glob('/sys/class/leds/*thinklight*/brightness'))
+        return leds[0] if leds else None
+
+    def poll_thinklight(self):
+        """Watch the LED; only a change has to repaint the desktop."""
+        path = getattr(self, 'thinklight_led', None)
+        if not path:
+            return
+        try:
+            with open(path) as f:
+                on = f.read().strip() not in ('', '0')
+        except OSError:
+            self.thinklight_led = None  # no access or no ThinkPad: stop asking
+            on = False
+        if on != self.thinklight:
+            self.thinklight = on
+            self.dirty = True
+
+    def thinklight_rows(self):
+        size = self.cfg.get('thinklight_size', 'medium')
+        return self.THINKLIGHT_CONES.get(size, self.THINKLIGHT_CONES['medium'])
+
+    def thinklight_x(self, rows=None):
+        """Left edge of the cone; the lamp (star) stays put when the size changes."""
+        rows = rows or self.thinklight_rows()
+        width_cm = self.panel_cm[0] if getattr(self, 'panel_cm', None) else 25
+        # 4 cm from the left, three cells further in, at the star of the medium
+        # cone (9 cells wide) - every size hangs from that same lamp
+        star = int(round(4 * self.w / width_cm)) - 3 + 4
+        x = star - (len(rows[0]) - 1) // 2
+        return max(0, min(self.w - len(rows[0]), x))
+
+    def draw_thinklight(self, cv):
+        """Small cone under the lid lamp while the ThinkLight is on."""
+        if not self.thinklight or not self.cfg.get('thinklight', True):
+            return
+        th = self.theme
+        rows = self.thinklight_rows()
+        cw = len(rows[0])
+        if self.w < cw + 6 or self.desk_h < len(rows) + 2:
+            return
+        x = self.thinklight_x(rows)
+        y = self.desk_y
+        for i, line in enumerate(rows):
+            fg = 'accent' if i == 0 else ('dim' if i == len(rows) - 1 else 'bright')
+            attr = th.c(fg, 'desk')
+            for j, ch in enumerate(line):
+                if ch != ' ':            # leave the wallpaper visible between rays
+                    cv.putc(x + j, y + i, ch, attr)
 
     def draw_desktop(self, cv):
         th = self.theme
