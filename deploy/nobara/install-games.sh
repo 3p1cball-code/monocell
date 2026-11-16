@@ -63,8 +63,11 @@ if [ "$DRY" = 1 ]; then
 else
     mkdir -p "$DOOM_DIR"
     for n in freedoom1 freedoom2; do
-        src=/usr/share/freedoom/$n.wad
-        if [ -f "$src" ] && [ ! -e "$DOOM_DIR/$n.wad" ]; then
+        src=
+        for d in /usr/share/doom /usr/share/freedoom /usr/share/games/doom; do
+            [ -f "$d/$n.wad" ] && { src=$d/$n.wad; break; }
+        done
+        if [ -n "$src" ] && [ ! -e "$DOOM_DIR/$n.wad" ]; then
             ln -s "$src" "$DOOM_DIR/$n.wad"
             echo "  $DOOM_DIR/$n.wad -> $src"
         fi
@@ -86,6 +89,30 @@ for g in vitetris freesweep ttysolitaire pacman4console ninvaders brogue; do
     fi
 done
 
+# Fedora's cataclysm-dda (fc43/fc44) segfaults on start; the Debian build runs
+# fine against the same data.  The wrapper lives in /usr/local/bin, which comes
+# before /usr/bin on PATH, so the menu finds the working one.
+if [ -f "$BINARIES/cataclysm" ]; then
+    if [ "$DRY" = 1 ]; then
+        echo "  install cataclysm.bin + wrapper in /usr/local/bin"
+    else
+        install -m 755 "$BINARIES/cataclysm" /usr/local/games/cataclysm.bin
+        cat > /usr/local/bin/cataclysm <<'WRAP'
+#!/bin/sh
+# Fedora's own cataclysm binary crashes; this is the Debian build, pointed at
+# whichever data directory the distribution installed.
+for d in /usr/share/cataclysm-dda /usr/share/games/cataclysm-dda; do
+    [ -d "$d" ] && exec /usr/local/games/cataclysm.bin --datadir "$d" "$@"
+done
+exec /usr/local/games/cataclysm.bin "$@"
+WRAP
+        chmod 755 /usr/local/bin/cataclysm
+        echo "  /usr/local/bin/cataclysm -> cataclysm.bin (Fedora's build crashes)"
+    fi
+else
+    echo "  cataclysm: not in $BINARIES, Fedora's own build is used"
+fi
+
 if [ -f "$BINARIES/doom-ascii.bin" ]; then
     if [ "$DRY" = 1 ]; then
         echo "  install doom-ascii.bin + wrapper"
@@ -96,8 +123,10 @@ if [ -f "$BINARIES/doom-ascii.bin" ]; then
 #!/bin/sh
 # DOOM in the terminal (doom-ascii against the Freedoom IWAD).
 wad=/usr/share/games/doom/freedoom1.wad
+[ -f "$wad" ] || wad=/usr/share/doom/freedoom1.wad
 [ -f "$wad" ] || wad=/usr/share/freedoom/freedoom1.wad
 [ -f "$wad" ] || wad=/usr/share/games/doom/freedoom2.wad
+[ -f "$wad" ] || wad=/usr/share/doom/freedoom2.wad
 [ -f "$wad" ] || wad=/usr/share/freedoom/freedoom2.wad
 cols=$(tput cols 2>/dev/null || echo 80)
 lines=$(tput lines 2>/dev/null || echo 24)
@@ -119,10 +148,12 @@ fi
     echo "== what Monocell will find =="
 for g in crawl cataclysm nethack brogue doom-ascii vitetris nudoku freesweep \
          ttysolitaire pacman4console ninvaders moon-buggy chocolate-doom; do
-    p=
-    for d in /usr/local/games /usr/games /usr/bin /usr/local/bin; do
-        [ -x "$d/$g" ] && { p=$d/$g; break; }
-    done
+    p=$(command -v "$g" 2>/dev/null || true)
+    if [ -z "$p" ]; then
+        for d in /usr/local/games /usr/games /usr/bin /usr/local/bin; do
+            [ -x "$d/$g" ] && { p=$d/$g; break; }
+        done
+    fi
     if [ -n "$p" ]; then
         echo "  $g -> $p"
     else

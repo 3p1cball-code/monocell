@@ -7,7 +7,7 @@
   entry said "not installed" although the menu was there. A command is now tried
   as given, then on `PATH`, then in `/usr/local/games`, `/usr/games`, `/usr/bin`
   and `/usr/local/bin`; the Freedoom IWAD is looked up in
-  `/usr/share/games/doom` and `/usr/share/freedoom`. `deploy/nobara/install-games.sh`
+  `/usr/share/games/doom`, `/usr/share/doom` and `/usr/share/freedoom`. `deploy/nobara/install-games.sh`
   installs what Fedora ships (crawl, cataclysm-dda, nethack, nudoku, moon-buggy,
   chocolate-doom, openarena, freedoom) and copies the small console games only
   Debian has (vitetris, freesweep, ttysolitaire, pacman4console, ninvaders,

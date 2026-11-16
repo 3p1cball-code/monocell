@@ -275,6 +275,7 @@ class MoonBuggy(Game):
 
 # ---------------------------------------------------------------- graphics games
 DOOM_WADS = ('/usr/share/games/doom/freedoom1.wad',
+             '/usr/share/doom/freedoom1.wad',      # Fedora
              '/usr/share/freedoom/freedoom1.wad')
 
 
