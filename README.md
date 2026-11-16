@@ -348,10 +348,25 @@ monocell-clip --clear
   die Filterskette 26 ms (VGA) bzw. 24 ms (CGA) → ~30 fps beim Panen.
 * **YouTube** – Suche über `yt-dlp` (auch Video-Links), Ergebnisliste mit Thumbnail,
   Kanal, Dauer und Aufrufen; Wiedergabe lädt max. 480p in den Cache und öffnet den
-  Video-Player. Kein Konto, keine API; `yt-dlp` sollte aktuell sein.
+  Video-Player. **Für dich** (Button, `F3`) zeigt die persönlichen Vorschläge des
+  angemeldeten Kontos von `youtube.com/feed/recommended` – höchstens 25 normale
+  Videos, Shorts und Mixe werden aussortiert, die Liste ist 15 Minuten gecacht.
+  Dafür in Einstellungen → YouTube `Firefox`, `Brave`, `Chromium` oder `Chrome`
+  wählen (dort bei YouTube angemeldet; Firefox braucht keinen Keyring) oder eine
+  exportierte Netscape-`cookies.txt` angeben. Keine API, keine Passwörter;
+  `yt-dlp` sollte aktuell sein.
 * **Musik** – Ordner-Playlist, Transport, Spulen, Lautstärke, Live-Spektrum
   (Goertzel-Bänder, in Python). Ton geht über PipeWire/PulseAudio/ALSA
   (`pw-cat --raw` → `pacat` → `aplay`, mit automatischem Fallback).
+* **Paint** – ASCII-Art malen: Stift, Linie, Rechteck, Oval, Füllen, Radierer,
+  Text und Pipette, Undo/Redo, drei Pinselmodi (`char`; `ramp` nimmt die Dichte aus
+  dem Stiftdruck; `smart` nimmt `- | / \` aus der Richtung), 16 Text- und 16
+  Hintergrundfarben plus „kein Hintergrund“. Dokumente sind `.mcpaint`-JSON und
+  lassen sich als `.txt` oder `.ans` exportieren. Auf der Konsole liest Paint Stift
+  und Touchscreen eines Convertibles direkt über evdev, solange es den Fokus hat
+  (die Geräte werden gegrabbt, damit mousedev aus dem absoluten Tippen keinen
+  wandernden Zeiger macht): Druck ist Tintendichte und Pinselgröße, das
+  Radierer-Ende radiert. Im Terminal arbeitet die Maus wie sonst.
 * **Snake** – klassisches Schlangenspiel im Zellenraster: Pfeile/WASD, Futter
   fressen, länger werden, Highscore. `Space` pausiert, `R` startet neu.
 * **Jump** – kleiner Plattformer mit drei Leveln, Münzen, Stacheln und drei

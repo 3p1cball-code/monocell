@@ -159,6 +159,7 @@ REGISTRY = [
     ('maps', 'maps', 'Maps', '[m]', 'OpenStreetMap in graphics mode', 'Media'),
     ('youtube', 'youtube', 'YouTube', '[Y]', 'Search & play YouTube', 'Media'),
     ('music', 'music', 'Music', '(~)', 'Music player', 'Media'),
+    ('paint', 'paint', 'Paint', '[~]', 'ASCII-Art malen', 'Media'),
     ('snake', 'snake', 'Snake', '[S]', 'Classic snake', 'Games'),
     ('jump', 'jump', 'Jump', '[J]', 'Tiny platformer', 'Games'),
     ('jezzball', 'jezzball', 'JezzBall', '[o]', 'Split the field, trap the balls', 'Games'),

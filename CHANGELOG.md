@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Paint** (Media): ASCII art with pen, line, rectangle, oval, fill, eraser,
+  text and a colour picker; undo/redo, three brush modes (`char`; `ramp` takes the
+  density from the pen pressure; `smart` takes `- | / \` from the direction), 16
+  text and 16 background colours plus "no background". Documents are `.mcpaint`
+  JSON and export as `.txt` or `.ans`. On the console Paint reads the pen and the
+  touchscreen of a convertible straight from evdev while it has the focus (the
+  devices are grabbed, so mousedev does not turn the absolute touch into a
+  wandering pointer): pressure is ink density and brush size, the eraser end
+  erases. In a terminal the mouse works as usual.
+
 - **Space bar fixed in Snake, Jump and Pi Benchmark.** On a normal console the
   space key arrives as `' '`, and only the kitty keyboard protocol sends
   `ESC[32;1u` (which the VT parser turns into `'space'`). Those apps only knew the
@@ -32,6 +42,23 @@
   unreachable red.
 - **Settings**: the overloaded Desktop page is split into Windows, Desktop,
   Background, Famagic and System.
+- **YouTube: personal recommendations.** With a sign-in configured, the app opens
+  with the account's `youtube.com/feed/recommended` list (at most 25 normal
+  videos; Shorts and mixes filtered out) and caches it for 15 minutes. `F3` or
+  the "For you" button reloads. Sign-in takes the cookies of Firefox, Brave,
+  Chromium or Chrome on the same machine, or an exported Netscape `cookies.txt`;
+  Settings -> YouTube explains both. No password reaches the app, and the
+  recommendations fall back to search when no sign-in is set.
+- The desktop now shows the X61s lid lamp: while the ThinkLight is on, a small
+  ASCII cone hangs at the top edge, 4 cm from the left minus three cells (the
+  panel's EDID width and the console font turn that into cells: 24 columns in
+  Terminus 6x12, 30 in minimal-cell 5x7, 15 in IBM 3270). Amber bulb, bright rays,
+  dim tips; the LED is polled every 250 ms and only a change repaints, spaces
+  between the rays leave the wallpaper alone. Settings -> Desktop turns the cone
+  on or off and picks its size (tiny, mini, small, medium, large); every size hangs from the
+  same lamp, so only the beam grows or shrinks.
+  `MONOCELL_FAKE_THINKLIGHT` and `MONOCELL_FAKE_PANEL_CM` point the check and the
+  panel size at test values for tests and snapshots.
 - The X61s session (`monocell-session`, `.profile` autostart, deploy scripts) no longer
   runs `monocell --lowmem`: shadows on, video at the configured frame rate. The switch
   itself still exists and now only turns shadows off.
