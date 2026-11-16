@@ -360,6 +360,8 @@ DEFAULT_CONFIG = {
     'search_url': 'https://html.duckduckgo.com/html/?q=%s',
     'chromium': '',
     'music_dir': '',
+    'youtube_signin': 'off',      # off | firefox | brave | chromium | chrome | cookies.txt
+    'youtube_cookies': '',        # Netscape cookies.txt for the cookies.txt sign-in
     'gcal_url': '',
     'opencode_cmd': 'opencode',
     'opencode_host': '',

@@ -6,12 +6,13 @@ from ..theme import (PRESETS, PRESET_FONTS, available_fonts, delete_theme,
 from ..util import fit
 from ..widgets import MenuItem, TextField, button
 from .appearance import AppearanceMixin
+from .youtube import SIGNIN_CHOICES
 
 SECTIONS = [('colors', 'Appearance'), ('windows', 'Windows'), ('desktop', 'Desktop'),
             ('background', 'Background'), ('famagic', 'Famagic'),
             ('media', 'Images & video'), ('sounds', 'Sounds'), ('maps', 'Maps'), ('web', 'Web'),
-            ('calendar', 'Calendar'), ('tools', 'Tools'), ('system', 'System'),
-            ('about', 'About')]
+            ('youtube', 'YouTube'), ('calendar', 'Calendar'), ('tools', 'Tools'),
+            ('system', 'System'), ('about', 'About')]
 
 
 OPTIONS = {
@@ -76,6 +77,10 @@ OPTIONS = {
         ('web_home', 'Home page', 'text'),
         ('search_url', 'Search URL (%s = query)', 'text'),
         ('chromium', 'Chromium/Brave for the graphics mode (empty = auto)', 'text'),
+    ],
+    'youtube': [
+        ('youtube_signin', 'Sign-in for personal recommendations', SIGNIN_CHOICES),
+        ('youtube_cookies', 'Cookies file (Netscape format)', 'file'),
     ],
     'calendar': [
         ('gcal_url', 'Google Calendar iCal address', 'text'),
@@ -421,6 +426,17 @@ class Settings(AppearanceMixin, App):
                    'default; enter user@host to run a remote instance over SSH instead. If the '
                    'SSH connection fails, the local command is tried. SSH keys must allow the '
                    'connection.')
+            for i, ln in enumerate(wrap_text(txt, cv.w)):
+                cv.put(0, y + i, ln, th.c('dim', 'win'))
+        if self.section == 'youtube' and y < cv.h:
+            from ..util import wrap_text
+            txt = ('Personal recommendations come from youtube.com/feed/recommended and need a '
+                   'YouTube account. Sign in to YouTube in Firefox, Brave, Chromium or Chrome on '
+                   'this machine and pick that browser here; yt-dlp reads its cookies (Firefox '
+                   'needs no keyring). Alternatively export youtube.com cookies as a Netscape '
+                   'cookies.txt (add-on "Get cookies.txt LOCALLY") and choose the file - without '
+                   'a path the app looks for ~/.config/monocell/youtube-cookies.txt. Shorts and '
+                   'mixes are filtered out; the cookies stay on this machine.')
             for i, ln in enumerate(wrap_text(txt, cv.w)):
                 cv.put(0, y + i, ln, th.c('dim', 'win'))
         if self.section == 'calendar' and y < cv.h:
