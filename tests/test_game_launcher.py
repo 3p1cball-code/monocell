@@ -261,3 +261,37 @@ class TestQuake3(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestResolve(unittest.TestCase):
+    """A game is found whatever the distribution calls its binary directory."""
+
+    def test_absolute_path_is_kept(self):
+        self.assertEqual(game.resolve(sys.executable), sys.executable)
+
+    def test_name_on_path_is_found(self):
+        self.assertEqual(game.resolve('sh'), game.which('sh'))
+
+    def test_falls_back_to_a_game_dir(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, 'frobnicate')
+        with open(path, 'w'):
+            pass
+        os.chmod(path, 0o755)
+        old = game.GAME_DIRS
+        game.GAME_DIRS = (d,)
+        try:
+            self.assertEqual(game.resolve('/usr/games/frobnicate'), path)
+            self.assertEqual(game.resolve('frobnicate'), path)
+        finally:
+            game.GAME_DIRS = old
+
+    def test_nothing_found(self):
+        self.assertIsNone(game.resolve('/nope/definitely-not-here'))
+
+    def test_doom_uses_the_wad_that_exists(self):
+        with mock.patch.object(game, 'doom_wad', return_value='/w/freedoom1.wad'):
+            argv = game.DoomGfx.argv()
+        self.assertIn('/w/freedoom1.wad', argv)
+        self.assertNotIn('/usr/share/games/doom/freedoom1.wad', argv)

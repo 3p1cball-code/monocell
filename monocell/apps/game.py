@@ -34,6 +34,26 @@ PERF = ('+set', 'com_maxfps', '30',
 
 
 GAME_SIZES = ((800, 600), (640, 480))
+GAME_DIRS = ('/usr/local/games', '/usr/games', '/usr/bin', '/usr/local/bin')
+
+
+def resolve(exe):
+    """Executable for a game command: as given, on PATH, or in a usual game dir.
+
+    Debian keeps its games in /usr/games, Fedora and Nobara in /usr/bin, and
+    self-built ones sit in /usr/local/games.  The menu should not care which.
+    """
+    base = os.path.basename(exe)
+    if os.path.isabs(exe) and os.path.exists(exe):
+        return exe
+    found = which(base)
+    if found:
+        return found
+    for d in GAME_DIRS:
+        path = os.path.join(d, base)
+        if os.path.exists(path):
+            return path
+    return None
 
 
 def display_modes():
@@ -184,15 +204,11 @@ class Game:
         if not argv:
             return None
         exe = argv[0]
-        if not os.path.isabs(exe):
-            found = which(exe)
-            if not found:
-                wm.message(cls.title, '%s is not installed.' % exe)
-                return None
-            argv[0] = found
-        elif not os.path.exists(exe):
+        found = resolve(exe)
+        if not found:
             wm.message(cls.title, '%s is not installed.' % exe)
             return None
+        argv[0] = found
         return run(wm, argv, cls.title, cls.mode == 'gfx', cls.env, cls.cwd)
 
 
@@ -258,16 +274,28 @@ class MoonBuggy(Game):
 
 
 # ---------------------------------------------------------------- graphics games
+DOOM_WADS = ('/usr/share/games/doom/freedoom1.wad',
+             '/usr/share/freedoom/freedoom1.wad')
+
+
+def doom_wad():
+    """The Freedoom IWAD, wherever the distribution put it."""
+    for path in DOOM_WADS:
+        if os.path.exists(path):
+            return path
+    return DOOM_WADS[0]
+
+
 class DoomGfx(Game):
     title = 'Doom (Grafik)'
     mode = 'gfx'
-    command = ('/usr/games/chocolate-doom', '-iwad',
-               '/usr/share/games/doom/freedoom1.wad')
+    command = ('/usr/games/chocolate-doom', '-iwad', DOOM_WADS[0])
 
     @classmethod
     def argv(cls):
         w, h = game_size()
-        return list(cls.command) + ['-width', str(w), '-height', str(h)]
+        return [cls.command[0], '-iwad', doom_wad(),
+                '-width', str(w), '-height', str(h)]
 
 
 Q3E = '/usr/local/games/quake3e/quake3e.x64'

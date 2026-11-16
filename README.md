@@ -394,7 +394,12 @@ monocell-clip --clear
   **Half-Life** läuft über **Xash3D FWGS** (i386) mit den Steam-Daten unter
   `/usr/local/share/half-life/valve`; das Spiel liegt unter Games → Half-Life.
   Doom läuft mit Freedoom; Quake 3 erklärt ohne Daten, wohin die `pak*.pk3` gehören,
-  und bietet OpenArena an.
+  und bietet OpenArena an. Ein Befehl wird dort gesucht, wo die Distribution ihn
+  hinlegt: erst der eingetragene Pfad, dann `PATH`, dann `/usr/local/games`,
+  `/usr/games`, `/usr/bin` und `/usr/local/bin` (Debian vs. Fedora). Auf
+  Fedora/Nobara installiert `sudo deploy/nobara/install-games.sh` die Pakete und
+  kopiert die kleinen Konsolenspiele, die es nur in Debian gibt, nach
+  `/usr/local/games`.
 * **System** – Hardware, CPU-Kerne, Speicher, Datenträger, Netz, Batterie (mit
   Restzeit/Ladezeit), Temperatur, **Lüfterdrehzahl**, Prozessliste (SIGTERM/SIGKILL)
   und die eigenen Fenster samt Timern/Threads.

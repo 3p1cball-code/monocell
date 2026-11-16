@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Console games on Fedora/Nobara.** The Games menu only looked for a binary at
+  its Debian path (`/usr/games/...`), so on the Yoga and the workstation every
+  entry said "not installed" although the menu was there. A command is now tried
+  as given, then on `PATH`, then in `/usr/local/games`, `/usr/games`, `/usr/bin`
+  and `/usr/local/bin`; the Freedoom IWAD is looked up in
+  `/usr/share/games/doom` and `/usr/share/freedoom`. `deploy/nobara/install-games.sh`
+  installs what Fedora ships (crawl, cataclysm-dda, nethack, nudoku, moon-buggy,
+  chocolate-doom, openarena, freedoom) and copies the small console games only
+  Debian has (vitetris, freesweep, ttysolitaire, pacman4console, ninvaders,
+  Brogue, text DOOM) from a directory of binaries into `/usr/local/games`.
 - **Paint** (Media): ASCII art with pen, line, rectangle, oval, fill, eraser,
   text and a colour picker; undo/redo, three brush modes (`char`; `ramp` takes the
   density from the pen pressure; `smart` takes `- | / \` from the direction), 16
