@@ -394,8 +394,8 @@ class TestPen(unittest.TestCase):
 class TestApp(unittest.TestCase):
     def test_canvas_fills_view(self):
         a = app(96, 32)
-        self.assertEqual((a.doc.w, a.doc.h), (96, 29))
-        self.assertEqual(a.view(), (0, TOP, 96, 29))
+        self.assertEqual((a.doc.w, a.doc.h), (96, 28))     # 32 - TOP - status line
+        self.assertEqual(a.view(), (0, TOP, 96, 28))
 
     def test_freehand_stroke_is_connected(self):
         a = app()
@@ -529,7 +529,7 @@ class TestApp(unittest.TestCase):
         a.on_mouse(Mouse('wheeldown', 5, TOP + 1))
         self.assertEqual(a.vy, 3)
         a.scroll(1000, 1000)
-        self.assertEqual((a.vx, a.vy), (100 - 40, 50 - 9))
+        self.assertEqual((a.vx, a.vy), (100 - 40, 50 - 8))   # 12 - TOP - status line
         click(a, 'down', 0, TOP)
         self.assertEqual(a.doc.ch[a.vy][a.vx], '#')
 
