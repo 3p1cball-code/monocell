@@ -561,7 +561,7 @@ class Bench(App):
         elif k == 'l':
             if not self.running and not self.long:
                 self.start(long=True)
-        elif k in ('x', 'space'):
+        elif k in ('x', ' ', 'space'):
             if self.running or self.long:
                 self.stop()
         elif k in ('+', '=', 'right'):

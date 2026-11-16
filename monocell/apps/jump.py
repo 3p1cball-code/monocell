@@ -367,12 +367,12 @@ class Jump(App):
         if self.state == 'clear':
             return True
         if self.state in ('over', 'won'):
-            if k in ('space', 'enter', 'r'):
+            if k in (' ', 'space', 'enter', 'r'):
                 self.restart()
                 return True
             return False
         if self.state == 'paused':
-            if k in ('p', 'esc', 'space', 'enter'):
+            if k in ('p', 'esc', ' ', 'space', 'enter'):
                 self.state = 'running'
                 self.invalidate()
                 return True
@@ -392,7 +392,7 @@ class Jump(App):
             self.game.step(1)
             self.invalidate()
             return True
-        if k in ('up', 'space', 'w', 'enter'):
+        if k in ('up', ' ', 'space', 'w', 'enter'):
             if self.state == 'start':
                 self.state = 'running'
             self.game.jump()

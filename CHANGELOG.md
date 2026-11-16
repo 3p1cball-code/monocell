@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Space bar fixed in Snake, Jump and Pi Benchmark.** On a normal console the
+  space key arrives as `' '`, and only the kitty keyboard protocol sends
+  `ESC[32;1u` (which the VT parser turns into `'space'`). Those apps only knew the
+  second name, so "SPACE / ENTER START" did nothing until Enter was pressed.
+  Both names are accepted now; JezzBall is written that way from the start.
+- **JezzBall (Games).** The field is split by walls while the balls keep bouncing;
+  every enclosed area without a ball in it is filled and counts as captured, and
+  75 % clears the level, after which the next one starts with one more ball and a
+  little more speed. A wall grows from the aim cell outwards (the whole row or
+  column, until it hits something) and a ball that touches it while it grows
+  destroys it and costs one of the three lives. Arrows/WASD aim, `Space` or a left
+  click builds horizontally, `Enter` or a right click vertically; the crosshair
+  already shows what each of the two would span. Walls need one second for the
+  whole field whatever the window size - on a wide terminal a fixed speed made
+  them unplayable. Rules in `monocell/apps/jezzball.py` are terminal free
+  (`tests/test_jezzball.py`), the level is redrawn every 30 ms with a real-time
+  delta so a slow frame does not stretch the build.
 - **Famagic** app: shared family task and shopping lists through the separate
   [famagic-sync](https://github.com/3p1cball-code/famagic-sync) bridge on VEGA. List
   tabs, person filter (ignored for private lists), due dates with a calendar, series

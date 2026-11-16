@@ -161,6 +161,7 @@ REGISTRY = [
     ('music', 'music', 'Music', '(~)', 'Music player', 'Media'),
     ('snake', 'snake', 'Snake', '[S]', 'Classic snake', 'Games'),
     ('jump', 'jump', 'Jump', '[J]', 'Tiny platformer', 'Games'),
+    ('jezzball', 'jezzball', 'JezzBall', '[o]', 'Split the field, trap the balls', 'Games'),
     ('crawl', 'game', 'Dungeon Crawl', '[C]', 'DCSS 0.28 (Roguelike)', 'Games'),
     ('cataclysm', 'game', 'Cataclysm', '[Z]', 'Dark Days Ahead 0.H', 'Games'),
     ('brogue', 'game', 'Brogue', '[B]', 'Brogue CE (Roguelike)', 'Games'),

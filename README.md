@@ -358,6 +358,13 @@ monocell-clip --clear
   Leben. Pfeile/WASD laufen, `Space`/`↑` springen, `S`/`↓` stoppen, `P` pausiert.
   Die Level liegen als ASCII-Karten in `monocell/apps/jump.py` und lassen sich
   dort direkt erweitern.
+* **JezzBall** – die Spielfläche teilen, während die Bälle umherfliegen: eine Wand
+  wächst von der Zielfläche aus nach beiden Seiten (ganze Zeile oder Spalte), ein
+  Ball, der sie beim Wachsen berührt, zerstört sie und kostet ein Leben. Jede
+  eingeschlossene Fläche ohne Ball wird gefüllt und zählt; 75 % räumen das Level,
+  danach kommen ein Ball und etwas Tempo dazu. Pfeile/WASD zielen, `Space`/Linksklick
+  baut waagerecht, `Enter`/Rechtsklick senkrecht – das Fadenkreuz zeigt vorher, wie
+  weit beide reichen. `P` pausiert, `R` startet neu, `Q` beendet.
 * **Spiele (extern)** – Startmenü → Games startet die installierten Spiele
   **bildschirmfüllend und ohne Fenster**: Dungeon Crawl (DCSS), Cataclysm, Brogue,
   NetHack, Doom (Text über `doom-ascii`, Grafik über Chocolate Doom), OpenArena,

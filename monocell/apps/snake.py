@@ -208,7 +208,7 @@ class Snake(App):
             return self._turn(-1, 0)
         if k in ('right', 'd'):
             return self._turn(1, 0)
-        if k in ('space', 'enter'):
+        if k in (' ', 'space', 'enter'):
             self._toggle(start=True)
             return True
         if k in ('p', 'esc'):
