@@ -13,11 +13,18 @@ from monocell.theme import Config, Theme  # noqa: E402
 from monocell.wm import WM  # noqa: E402
 
 
+class _CleanConfig(Config):
+    """Defaults only - the user's own thinklight size must not leak into a test."""
+    _dir = tempfile.mkdtemp(prefix='monocell-thinklight-')
+    path = os.path.join(_dir, 'config.json')
+    legacy = os.path.join(_dir, 'textwin.json')
+
+
 class Stub(WM):
     """Only the bits poll_thinklight/draw_thinklight touch (no real WM init)."""
 
     def __init__(self, w=80, h=24):
-        self.cfg = Config()
+        self.cfg = _CleanConfig()
         self.theme = Theme(self.cfg)
         self.w, self.h = w, h
         self.desk_y, self.desk_h = 0, h - 1
