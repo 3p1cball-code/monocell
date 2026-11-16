@@ -24,7 +24,7 @@ CATALOG = [
     ('win95', 'win95.wav', 'Windows 95',
      "Brian Eno's \"The Microsoft Sound\" (1995) - the chime that started it all."),
     ('win98', 'win98.wav', 'Windows 98',
-     'The same "Microsoft Sound" as 95 (1998); the last of the classic boot chimes.'),
+     'The longer reworked version of the 95 chime that shipped with 98.'),
     ('win2000', 'win2000.wav', 'Windows 2000',
      "Microsoft's deeper, calmer professional startup (2000)."),
     ('winxp', 'winxp.wav', 'Windows XP',
