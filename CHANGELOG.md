@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **Dithering with a choice.** `d` in the graphics mode used to be an on/off:
+  the hand-made 4×4 Bayer matrix or nothing. It now cycles through `BAYER 2`
+  (four thresholds, coarse and very visible), `BAYER 4` (sixteen, the classic and
+  still the default), `BAYER 8` (sixty-four, almost smooth), `NOISE` (random
+  thresholds without a pattern, standing still), `GRAIN` (the same noise, but it
+  moves with every frame like film) and `OFF`. For the palette looks the ordered
+  ones ride on ffmpeg's `paletteuse` with a scale that follows the matrix size,
+  the noise modes add ffmpeg's zero-mean noise to the brightness only (noise in
+  all three channels made the palette jump between hues - coloured snow), and the
+  grey looks dither with a random threshold mask of their own, which keeps the
+  picture's brightness exactly. Measurements on the X61s: 1080p into the
+  framebuffer still runs at 31-34 frames a second in every mode, noise costs
+  nothing measurable. Settings → Images & video lists the modes too, old configs
+  with `bayer` keep working (`bayer4`).
+- **Drag and drop between windows.** Press on a file in Files, move two cells and
+  let go over another window: the window manager carries a small payload from the
+  source app to the one under the pointer. The drag shows the name at the cursor,
+  the target window gets an accent frame and the app may narrow it down (Files
+  highlights the folder row it would copy into). Files is the source (a marked set
+  goes together, an unmarked row goes alone) and a target (copy, with Shift move,
+  into the folder under the pointer or the one being shown); the video player
+  plays a dropped film, the music player plays it and appends it to its list, the
+  picture viewer opens a dropped picture, a terminal types the paths in. No X11,
+  no Wayland: the window manager knows where the pointer is and which window it is
+  over, so this works on a plain console (the VT mouse reports motion, a terminal
+  needs `1003` mouse tracking, which Monocell already switches on).
+- **A playlist in the video player.** Dropped films queue up; `l` shows and hides
+  the column (`PLAYLIST 2`, current entry marked), `n`/`b` jump to the next or
+  previous film, and when one ends the next starts by itself. A drop with nothing
+  playing starts at once.
+
 - **Two grey looks in the graphics mode.** `B/W 2` keeps nothing but black and
   white: every shade comes out of the 4×4 Bayer dithering alone (a 1-bit picture
   with seventeen apparent steps, like a printed page), `GREY 16` keeps black,

@@ -264,6 +264,23 @@ class Terminal(App):
         self.invalidate()
         return True
 
+    # ------------------------------------------------------------ drag and drop
+    def can_drop(self, payload):
+        return payload.get('kind') == 'files' and self.exited is None
+
+    def drop_hint(self, payload, x, y, mods=frozenset()):
+        if not payload or payload.get('kind') != 'files':
+            return None
+        return 'type %d path(s)' % len(payload['paths'])
+
+    def on_drop(self, payload, x, y, mods=frozenset()):
+        if payload.get('kind') != 'files' or self.exited is not None:
+            return None
+        import shlex
+        paths = [os.path.expanduser(p) for p in payload['paths']]
+        self.on_paste(' '.join(shlex.quote(p) for p in paths))
+        return 'Typed %d path(s)' % len(paths)
+
     def on_paste(self, text):
         if not text or self.exited is not None:
             return

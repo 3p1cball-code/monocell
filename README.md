@@ -170,6 +170,15 @@ monocell-clip --clear
   als Kopie mit Fortschritt, innerhalb eines Laufwerks ist Verschieben ein Rename.
   Der Kopiervorgang läuft im Hintergrund weiter, auch wenn man im Dateimanager
   weiterblättert.
+  **Ziehen und Ablegen:** eine Datei (oder alle markierten) aus der Liste herausziehen
+  und über einem Ordner loslassen – kopiert dorthin, mit `Shift` verschiebt es. Ein
+  zweites Dateifenster nimmt sie genauso auf, und der Videoplayer, die Musik, der
+  Bildbetrachter und ein Terminal sind ebenfalls Ziele. Während des Ziehens steht der
+  Name am Zeiger, der Zielordner leuchtet und das annehmende Fenster bekommt einen
+  Rahmen.
+
+  ![Datei auf den Videoplayer ziehen](screenshots/dnd.png)
+
 * **Browser** – die Seite als Text (eigener HTML-Parser, `urllib`, ohne JavaScript; sehr
   schnell): Lesemodus (`Aa` in der Leiste schaltet zwischen Lesemodus und ganzer Seite),
   Links, Formulare, Tabellen, Symbole und Bilder als geditherte Blöcke. `Ctrl+L`
@@ -284,6 +293,9 @@ monocell-clip --clear
 * **Video** – ffmpeg dekodiert direkt auf Zellauflösung; im randlosen Vollbild wird die
   volle Bildfläche als Zellen genutzt. Ton läuft parallel über die Audio-Pipeline (die
   auch die Master-Uhr stellt).
+  **Playlist:** Filme, die man auf den Player zieht, landen in einer Liste; `l` zeigt und
+  verbirgt die Spalte, `n`/`b` springen zum nächsten/vorigen Film, und am Ende eines
+  Films läuft der nächste von selbst weiter. Ohne laufenden Film startet ein Drop sofort.
   **Grafikmodus** (`g` oder `Gfx`, nur auf der Linux-Konsole): wie ein DOS-Spiel verlässt
   monocell den Textmodus – die Konsole wird per `KDSETMODE` auf `KD_GRAPHICS` gestellt und
   das Video landet direkt im Framebuffer (`/dev/fb0`), als harte Pixel in einem Viertel
@@ -299,12 +311,26 @@ monocell-clip --clear
   | `CGA 4` | Schwarz, Magenta, Cyan, Weiß – nach Helligkeit verteilt |
   | `AMBER` | Bernstein-Monitor: Schwarz, Glimmen, Bernstein, Lichter brennen fast weiß aus |
   | `GREEN` | grüner Phosphor-Monitor, ebenso mit fast weißen Lichtern |
-  | `B/W 2` | nur Schwarz und Weiß – jede Abstufung entsteht allein aus dem 4×4-Bayer-Dithering |
+  | `B/W 2` | nur Schwarz und Weiß – jede Abstufung entsteht allein aus dem Dithering |
   | `GREY 16` | Schwarz, Weiß und 14 gleichabständige Graustufen, dazwischen gedithert |
 
-  Tasten im Grafikmodus: `c` Look, `d` Dithering an/aus, `s` Scanlines, `o` Original
+  Die fehlenden Zwischenstufen macht das Dithering (`d`):
+
+  | Dithering | Wirkung |
+  |---|---|
+  | `BAYER 4` | 4×4-Matrix, 16 Schwellen – der Klassiker (Standard) |
+  | `BAYER 2` | 2×2, nur 4 Schwellen: grob und sehr sichtbar |
+  | `BAYER 8` | 8×8, 64 Schwellen: fast weich |
+  | `NOISE` | Zufallsschwellen ohne Muster, stehen still |
+  | `GRAIN` | Zufallsschwellen, die mit jedem Bild wandern – wie Filmkorn |
+  | `OFF` | kein Dithering: die Stufen bleiben stehen |
+
+  ![Dithering im Look B/W 2: BAYER 2, BAYER 4, BAYER 8, NOISE, GRAIN, OFF](screenshots/dither.png)
+
+  Tasten im Grafikmodus: `c` Look, `d` Dithering, `s` Scanlines, `o` Original
   (volle Auflösung und Farbe, ohne Palette – für Texte und Details),
-  `Leertaste`/Klick Pause, Pfeile spulen, `+`/`-` Lautstärke, `g`/`Esc` zurück zum Desktop.
+  `Leertaste`/Klick Pause, Pfeile spulen, `+`/`-` Lautstärke, `n`/`b` nächster/voriger
+  Film, `g`/`Esc` zurück zum Desktop.
   Ein OSD in 3×5-Pixelschrift (2×2-Pixelblöcke, halb so groß wie ein Video-Pixel –
   auch im Original-Modus) zeigt Zeit und Modus; es wird im Speicher in das Bild
   gesetzt und mit ihm in einem Schreibvorgang ausgegeben, damit es nicht flackert. Die

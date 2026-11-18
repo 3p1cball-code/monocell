@@ -275,6 +275,7 @@ class ListView:
     def draw(self, cv, x, y, w, h, row, th, scroll=True, bg='win'):
         """row(cv, x, y, w, item, index, selected)"""
         self.h = h
+        self.rect = (x, y, w, h)          # where it was drawn (hit tests after the fact)
         self.clamp()
         sw = 1 if scroll and len(self.items) > h else 0
         for i in range(h):

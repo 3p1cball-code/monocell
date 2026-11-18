@@ -121,6 +121,29 @@ class App:
     def on_paste(self, text):
         pass
 
+    # --- drag and drop between windows ---
+    # Press on something draggable, move two cells, let go over another window:
+    # the window manager asks the source for a payload and the target whether it
+    # takes it. A payload is a small dict, e.g. {'kind': 'files', 'paths': [...]}.
+    def drag_source(self, x, y):
+        """(payload, label) when a drag may start at content cell (x, y), else None."""
+        return None
+
+    def can_drop(self, payload):
+        """Whether this app would take `payload` (used to highlight while dragging)."""
+        return False
+
+    def on_drop(self, payload, x, y, mods=frozenset()):
+        """Take `payload` at content cell (x, y). Return a line for the toast, or None."""
+        return None
+
+    def drop_hint(self, payload, x, y, mods=frozenset()):
+        """While a drag hovers this window: show where it would land, and say so.
+
+        Return the text for the drag label (None keeps the payload's own), or
+        nothing. `payload is None` means the drag has left again."""
+        return None
+
     def selection_text(self):
         """Text the app has selected itself (used by Copy / Ctrl+Shift+C)."""
         return ''

@@ -18,6 +18,7 @@ import atexit
 import fcntl
 import hashlib
 import os
+import random
 import re
 import subprocess
 import time
@@ -71,7 +72,15 @@ TONE = {'cga': 'eq=gamma=1.25:contrast=1.15',
 BAYER_SCALE = {'vga': 2, 'theme': 2, 'ega': 1, 'cga': 1}
 SCALE = 4                              # screen pixels per picture pixel: a quarter resolution
 OSD_PX = 2                             # screen pixels per OSD font pixel
-DITHERS = ('bayer', 'none')
+# How the shades are faked: an ordered (Bayer) matrix of 2x2, 4x4 or 8x8
+# thresholds, random thresholds that leave no pattern (NOISE) or the same noise
+# that moves with every frame like film grain (GRAIN). 'none' keeps the flat steps.
+DITHERS = ('bayer2', 'bayer4', 'bayer8', 'noise', 'grain', 'none')
+DITHER_NAMES = {'bayer2': 'BAYER 2', 'bayer4': 'BAYER 4', 'bayer8': 'BAYER 8',
+                'noise': 'NOISE', 'grain': 'GRAIN', 'none': 'OFF'}
+OLD_DITHERS = {'bayer': 'bayer4'}      # names of earlier versions
+BAYER_SIZES = {'bayer2': 2, 'bayer4': 4, 'bayer8': 8}
+NOISE_MODES = ('noise', 'grain')
 PIX_FMT = {32: 'bgr0', 24: 'bgr24', 16: 'rgb565le'}
 
 
@@ -367,18 +376,106 @@ def palette_file(colours):
     return write_cached('gfxpal-%s.ppm' % hashlib.sha1(data).hexdigest()[:12], data)
 
 
-BAYER4 = ((0, 8, 2, 10), (12, 4, 14, 6), (3, 11, 1, 9), (15, 7, 13, 5))
+def bayer_matrix(n):
+    """The n x n ordered matrix (0 .. n*n-1), n a power of two, built the recursive way."""
+    m = [[0]]
+    while len(m) < n:
+        m = ([[4 * v for v in row] + [4 * v + 2 for v in row] for row in m] +
+             [[4 * v + 3 for v in row] + [4 * v + 1 for v in row] for row in m])
+    return m
 
 
-def bayer_file(w, h, step):
-    """Grey threshold pattern (classic 4x4 Bayer) scaled to one grey-level step."""
+BAYER = {n: bayer_matrix(n) for n in (2, 4, 8)}
+
+
+def bayer_file(w, h, step, n=4):
+    """Grey threshold pattern (ordered Bayer, n x n) scaled to one grey-level step.
+
+    A 2x2 matrix only has four thresholds, so a pair of colours can fake five
+    shades - coarse and very visible. 8x8 has 64 and looks almost smooth; 4x4
+    (16 thresholds) is the classic one."""
+    m = BAYER[n]
+    div = float(n * n)
     rows = []
     for y in range(h):
-        m = BAYER4[y % 4]
-        line = bytes(int((m[x % 4] + 0.5) * step / 16) for x in range(4))
-        rows.append((line * (w // 4 + 1))[:w])
+        line = m[y % n]
+        row = bytes(int((line[x] + 0.5) * step / div) for x in range(n))
+        rows.append((row * (w // n + 1))[:w])
     data = b'P5\n%d %d\n255\n' % (w, h) + b''.join(rows)
-    return write_cached('gfxbayer-%dx%d-%d.pgm' % (w, h, step), data)
+    return write_cached('gfxbayer-%dx%d-%d-%d.pgm' % (w, h, step, n), data)
+
+
+def noise_file(w, h, step):
+    """Random thresholds between 0 and one grey-level step - no pattern to see.
+
+    The same maths as the Bayer matrix (the threshold is added and the sum is
+    rounded down to a level), so the picture keeps its brightness; only the
+    order is gone. The seed depends on the size, so the cache stays valid."""
+    rnd = random.Random(0x5EED ^ (w << 16) ^ (h << 8) ^ step)
+    rows = [bytes(rnd.randrange(max(1, step)) for _ in range(w)) for _ in range(h)]
+    data = b'P5\n%d %d\n255\n' % (w, h) + b''.join(rows)
+    return write_cached('gfxnoise-%dx%d-%d.pgm' % (w, h, step), data)
+
+
+def dither_pattern(look, dither, colours, screen, scale):
+    """The mask a by-hand dither needs (luma looks only), or None."""
+    if look not in LUMA_LOOKS:
+        return None
+    mode = OLD_DITHERS.get(dither, dither)
+    if mode != 'noise' and mode not in BAYER_SIZES:
+        return None
+    cw, ch = canvas(screen, scale)
+    step = 255 // (len(colours) - 1)
+    if mode == 'noise':
+        return noise_file(cw, ch, step)
+    return bayer_file(cw, ch, step, BAYER_SIZES[mode])
+
+
+def dither_amplitude(colours):
+    """Half the distance between neighbouring palette colours: enough noise to hide
+    the steps, not so much that the picture turns into snow."""
+    n = max(2, len(colours))
+    return max(4.0, min(120.0, 255.0 / (n ** (1 / 3.0)) / 5))
+
+
+def noise_filter(amplitude, temporal=False, luma_only=False):
+    """ffmpeg's own zero-mean noise, in as many passes as the amplitude needs.
+
+    One pass reaches about +-50 (alls=100), which is plenty for a palette but not
+    for black and white; a second pass doubles the spread. `luma_only` keeps the
+    noise off the colour planes: a grey picture must not dither in blue and yellow.
+    """
+    amp = max(1.0, min(255.0, amplitude))
+    alls = int(max(1, min(100, round(amp * 2))))
+    flags = 't+u' if temporal else 'p+u'      # t+u moves with every frame
+    key = 'c0s' if luma_only else 'alls'      # plane 0 is the luma plane
+    passes = 2 if amp > 50 else 1
+    return ''.join('noise=%s=%d:allf=%s,' % (key, alls, flags) for _ in range(passes))
+
+
+def dither_name(dither):
+    return DITHER_NAMES.get(OLD_DITHERS.get(dither, dither), dither.upper())
+
+
+# what each mode does, shown under the on-screen display after 'd' was pressed
+DITHER_INFO = {
+    'bayer2': '2x2 Bayer: four thresholds, a very visible grid',
+    'bayer4': '4x4 Bayer: sixteen thresholds, the classic',
+    'bayer8': '8x8 Bayer: sixty-four thresholds, almost smooth',
+    'noise': 'random thresholds: no pattern, still picture',
+    'grain': 'random thresholds that move every frame, like film grain',
+    'none': 'no dithering: the flat steps stay',
+}
+
+
+def change_note(key, cfg, look):
+    """The sentence under the OSD after 'c' (look) or 'd' (dither) was pressed."""
+    if key == 'gfx_look':
+        return LOOKS[look][2]
+    if key == 'gfx_dither':
+        d = cfg.get(key, 'bayer4')
+        return DITHER_INFO.get(OLD_DITHERS.get(d, d))
+    return None
 
 
 def scanline_file(w, h, scale):
@@ -390,7 +487,7 @@ def scanline_file(w, h, scale):
     return write_cached('gfxscan-%dx%d-%d.pgm' % (w, h, scale), data)
 
 
-def build(video, screen, line_px, pix_fmt, look='vga', scale=SCALE, dither='bayer',
+def build(video, screen, line_px, pix_fmt, look='vga', scale=SCALE, dither='bayer4',
           scanlines=False, fps=25, palette=None, mask=None, colours=None, pattern=None,
           down='area', bayer_scale=None):
     """(extra inputs, filter graph) for one look. `video`: probe info of the stream.
@@ -402,20 +499,29 @@ def build(video, screen, line_px, pix_fmt, look='vga', scale=SCALE, dither='baye
     W, H = screen
     uw, uh = cw * scale, ch * scale
     x0, y0 = (W - uw) // 2, (H - uh) // 2
-    bs = bayer_scale or BAYER_SCALE.get(look, 2)
-    d = 'bayer:bayer_scale=%d' % bs if dither == 'bayer' else 'none'
+    mode = OLD_DITHERS.get(dither, dither)
+    # paletteuse dithers with ffmpeg's own 8x8 matrix; its scale sets how visible
+    # the pattern is, so the coarse 2x2 goes one step up and the fine 8x8 one down
+    base = bayer_scale if bayer_scale is not None else BAYER_SCALE.get(look, 2)
+    if mode in BAYER_SIZES:
+        bs = {2: base + 1, 4: base, 8: base - 1}[BAYER_SIZES[mode]]
+        d = 'bayer:bayer_scale=%d' % max(0, min(5, bs))
+    else:
+        d = 'none'
     luma = look in LUMA_LOOKS
     pre = '' if fps is None else 'fps=%d,' % fps
     inputs = []
     if luma:
-        # ordered dither by hand: add a Bayer threshold, round down to the grey levels
+        # dither by hand: add a threshold, round down to the grey levels
         n = len(colours)
         step = 255 // (n - 1)
         tone = TONE.get(look)              # the monitors get a contrast lift, grey none
-        g = ['[0:v]%sscale=%d:%d:flags=%s,setsar=1,format=gray,%s'
+        grain = (noise_filter(step / 2.0, temporal=True, luma_only=True)
+                 if mode == 'grain' else '')
+        g = ['[0:v]%sscale=%d:%d:flags=%s,setsar=1,format=gray,%s%s'
              'pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black[g]'
-             % (pre, fw, fh, down, tone + ',' if tone else '', cw, ch)]
-        if dither == 'bayer':
+             % (pre, fw, fh, down, tone + ',' if tone else '', grain, cw, ch)]
+        if pattern is not None and mode in ('noise',) + tuple(BAYER_SIZES):
             inputs.append(pattern)
             g.append('[g][1:v]blend=all_mode=addition[gd]')
             src, bias = 'gd', 0
@@ -424,7 +530,17 @@ def build(video, screen, line_px, pix_fmt, look='vga', scale=SCALE, dither='baye
         g.append("[%s]lut=c0='min(floor((val+%d)/%d),%d)*%d',format=rgb24,%s[q]"
                  % (src, bias, step, n - 1, step, colourize(colours)))
     else:
-        g = ['[0:v]%sscale=%d:%d:flags=%s,setsar=1,format=rgb24[s]' % (pre, fw, fh, down)]
+        noise = (noise_filter(dither_amplitude(colours), temporal=mode == 'grain',
+                              luma_only=True)
+                 if mode in NOISE_MODES else '')
+        chain = '[0:v]%sscale=%d:%d:flags=%s,setsar=1,' % (pre, fw, fh, down)
+        if noise:
+            # the noise goes on the brightness only: noise in all three channels
+            # makes the palette jump between hues (coloured snow), not shades
+            chain += 'format=yuv444p,%sformat=rgb24' % noise
+        else:
+            chain += 'format=rgb24'
+        g = [chain + '[s]']
         inputs.append(palette)
         g.append('[s][1:v]paletteuse=dither=%s[q]' % d)
     g.append('[q]format=rgb24,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,'
@@ -456,7 +572,7 @@ def build_original(video, screen, line_px, pix_fmt, fps=25, down='bilinear'):
 
 
 def command(path, offset, video, screen, line_px, pix_fmt, theme_rgb=None, accent=None,
-            look='vga', scale=SCALE, dither='bayer', scanlines=False, fps=25, vga_palette=None,
+            look='vga', scale=SCALE, dither='bayer4', scanlines=False, fps=25, vga_palette=None,
             down='area', original=False):
     """The ffmpeg command line producing raw framebuffer frames on stdout.
 
@@ -470,15 +586,11 @@ def command(path, offset, video, screen, line_px, pix_fmt, theme_rgb=None, accen
                '-filter_complex', graph, '-map', '[out]',
                '-f', 'rawvideo', '-pix_fmt', pix_fmt, '-']
         return cmd, cv
-    pal = pattern = None
+    pal = None
     colours = palette_colours(look, theme_rgb, accent)
-    if look in LUMA_LOOKS:                 # dither in grey, colour afterwards
-        cw, ch = canvas(screen, scale)
-        pattern = bayer_file(cw, ch, 255 // (len(colours) - 1))
-    elif look == 'vga' and vga_palette:
-        pal = vga_palette
-    else:
-        pal = palette_file(colours)
+    pattern = dither_pattern(look, dither, colours, screen, scale)
+    if look not in LUMA_LOOKS:             # the luma looks dither in grey, then colour
+        pal = vga_palette if (look == 'vga' and vga_palette) else palette_file(colours)
     mask = None
     if scanlines:
         cw, ch = canvas(screen, scale)
@@ -498,7 +610,7 @@ def command(path, offset, video, screen, line_px, pix_fmt, theme_rgb=None, accen
 
 
 def image_command(size, screen, line_px, pix_fmt, theme_rgb=None, accent=None, look='vga',
-                  scale=SCALE, dither='bayer', scanlines=False, vga_palette=None,
+                  scale=SCALE, dither='bayer4', scanlines=False, vga_palette=None,
                   down='area', bayer_scale=None, out='raw', original=False):
     """The same look for still pictures (the map app): the input comes on stdin as one
     raw rgb24 frame of `size` canvas pixels, each frame in gives one framebuffer frame.
@@ -508,16 +620,11 @@ def image_command(size, screen, line_px, pix_fmt, theme_rgb=None, accent=None, l
     running StillPipeline: the rawvideo muxer buffers a frame until the next one
     arrives, the image2pipe muxer flushes every picture."""
     colours = palette_colours(look, theme_rgb, accent) if not original else None
-    pal = pattern = mask = None
-    if original:
-        pass
-    elif look in LUMA_LOOKS:
-        cw, ch = canvas(screen, scale)
-        pattern = bayer_file(cw, ch, 255 // (len(colours) - 1))
-    elif look == 'vga' and vga_palette:
-        pal = vga_palette
-    else:
-        pal = palette_file(colours)
+    pal = mask = None
+    pattern = (dither_pattern(look, dither, colours, screen, scale)
+               if not original else None)
+    if not original and look not in LUMA_LOOKS:
+        pal = vga_palette if (look == 'vga' and vga_palette) else palette_file(colours)
     if scanlines and not original:
         cw, ch = canvas(screen, scale)
         mask = scanline_file(cw * scale, ch * scale, scale)
@@ -1012,7 +1119,7 @@ def main(argv=None):
     ap.add_argument('video')
     ap.add_argument('out')
     ap.add_argument('--look', default='vga', choices=LOOK_ORDER)
-    ap.add_argument('--dither', default='bayer', choices=DITHERS)
+    ap.add_argument('--dither', default='bayer4', choices=DITHERS)
     ap.add_argument('--scanlines', action='store_true')
     ap.add_argument('--at', type=float, default=5.0)
     ap.add_argument('--screen', default='1024x768')
@@ -1045,7 +1152,7 @@ def main(argv=None):
         se = Session(-1, fb)
         se.tty = ''
         se.frame = frame
-        se.note(['%s  %dx%d  %s' % (LOOKS[a.look][0], cv[0], cv[1], a.dither),
+        se.note(['%s  %dx%d  %s' % (LOOKS[a.look][0], cv[0], cv[1], dither_name(a.dither)),
                  'G EXIT  C LOOK  D DITHER  S SCANLINES'])
         se.bar = (a.at, 222.0, False)
         se.poke()

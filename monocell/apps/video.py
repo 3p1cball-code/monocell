@@ -13,7 +13,8 @@ from .. import fbmode, imaging
 from ..app import App
 from ..audio import AudioPlayer, probe
 from ..util import CACHE_DIR, HOME, fit, log, which
-from ..widgets import button, hbar
+from ..widgets import ListView, button, hbar
+from .files import kind_of
 from .music import fmt_t
 
 MODES = ['blend', 'pixel', 'grey', 'ascii', 'mono']
@@ -68,6 +69,11 @@ class Video(App):
         self.last_start = 0.0
         self.reading = False
         self.tuning = None
+        self.playlist = []          # a row of films: dropped on, or opened as a batch
+        self.pl_index = 0
+        self.pl_open = False        # the playlist column (l)
+        self.pl_list = ListView()
+        self.pl_list.on_activate = self.play_index
         if path:
             self.open(path)
         self.every(1.0 / 60, self.tick)
@@ -87,10 +93,64 @@ class Video(App):
         if path:
             self.open(path)
 
-    def open(self, path):
+    # ------------------------------------------------------------ playlist
+    def pl_width(self):
+        """Width of the playlist column, 0 when it is closed."""
+        if not self.pl_open or len(self.playlist) < 2 or not self.chrome:
+            return 0
+        return max(16, min(34, self.cw // 3))
+
+    def play_many(self, paths, start=0):
+        """Play a list of files: the first now, the rest from the playlist."""
+        paths = [p for p in paths if p]
+        if not paths:
+            return
+        start = max(0, min(start, len(paths) - 1))
+        self.pl_list.set_items(paths)
+        self.pl_list.select(start)
+        self.pl_open = len(paths) > 1
+        self.open(paths[start], playlist=paths)
+
+    def play_index(self, i):
+        if 0 <= i < len(self.playlist):
+            self.pl_index = i
+            self.pl_list.select(i)
+            self.open(self.playlist[i])
+
+    def next_video(self, d=1):
+        """d=1: the next film, d=-1: the one before, wrapping around."""
+        if len(self.playlist) < 2:
+            return False
+        self.play_index((self.pl_index + d) % len(self.playlist))
+        return True
+
+    def advance(self):
+        """A film ended: carry on with the playlist if there is one."""
+        if self.win.closed or not self.ended or len(self.playlist) < 2:
+            return
+        self.next_video()
+
+    def toggle_playlist(self):
+        if len(self.playlist) < 2:
+            self.wm.toast('No playlist - drop films onto the player', 'yellow', 3)
+            return
+        self.pl_open = not self.pl_open
+        self.start(self.media_time())      # the picture area changed width
+
+    def open(self, path, playlist=None):
         self.stop()
         self.path = path
         self.gfx_cap = 0
+        if playlist is not None:
+            self.playlist = list(playlist)
+            self.pl_index = self.playlist.index(path) if path in self.playlist else 0
+        elif path in self.playlist:
+            self.pl_index = self.playlist.index(path)
+        else:
+            self.playlist = [path] if path else []
+            self.pl_index = 0
+            if not self.playlist:
+                self.pl_open = False
         self.info = None
         self.err = ''
         self.set_title(os.path.basename(path))
@@ -110,7 +170,7 @@ class Video(App):
 
     # ------------------------------------------------------------ geometry
     def area(self):
-        w, h = self.cw, self.ch
+        w, h = self.cw - self.pl_width(), self.ch
         return (w, h - 2) if self.chrome else (w, h)
 
     def target_dims(self):
@@ -181,7 +241,7 @@ class Video(App):
         look = cfg.get('gfx_look', 'vga')
         look = fbmode.OLD_LOOKS.get(look, look)
         look = look if look in fbmode.LOOKS else 'vga'
-        dither = cfg.get('gfx_dither', 'bayer')
+        dither = cfg.get('gfx_dither', 'bayer4')
         # always a quarter of the screen resolution: more is not smooth on old hardware
         scale = 1 if self.goriginal else fbmode.SCALE
         return look, scale, dither, bool(cfg.get('gfx_scanlines', False))
@@ -281,7 +341,8 @@ class Video(App):
         if self.goriginal:
             return '%s  %dX%d  FULL COLOUR  %d FPS' % (fbmode.ORIGINAL_LABEL, cw, ch,
                                                       self.gfx_rate())
-        parts = [fbmode.LOOKS[look][0], '%dX%d' % (cw, ch), dither, '%d FPS' % self.gfx_rate()]
+        parts = [fbmode.LOOKS[look][0], '%dX%d' % (cw, ch), fbmode.dither_name(dither),
+                 '%d FPS' % self.gfx_rate()]
         if scan:
             parts.append('SCANLINES')
         return '  '.join(parts)
@@ -387,13 +448,15 @@ class Video(App):
         cur = cfg.get(key, values[0])
         if key == 'gfx_look':
             cur = fbmode.OLD_LOOKS.get(cur, cur)
+        elif key == 'gfx_dither':
+            cur = fbmode.OLD_DITHERS.get(cur, cur)
         cfg[key] = values[(values.index(cur) + 1) % len(values)] if cur in values else values[0]
         cfg.save()
         self.goriginal = False                  # a look key means: show me the look
         tuning = key == 'gfx_look' and cfg[key] == 'vga' and self.tune_palette()
         self.gfx_cap = 0
         self.start(self.media_time())
-        self.gfx_note(fbmode.LOOKS[self.gfx_settings()[0]][2] if key == 'gfx_look' else None,
+        self.gfx_note(fbmode.change_note(key, cfg, self.gfx_settings()[0]),
                       'TUNING THE PALETTE...' if tuning else None)
 
     def gfx_key(self, k):
@@ -566,6 +629,7 @@ class Video(App):
             self.paused = True
             self.pause_pos = dur
             self.audio.stop()
+            self.later(0.8, self.advance)      # a playlist carries on by itself
         if self.gfx:
             self.gfx_tick(t)
             return
@@ -628,6 +692,8 @@ class Video(App):
             self.zone(0, 0, aw, ah, 'screen')
             return
         self.zone(0, 0, aw, ah, 'screen')
+        if self.pl_width():
+            self.draw_playlist(cv, aw, 0, self.pl_width(), ah)
         if not self.chrome:
             return
         y = h - 2
@@ -636,8 +702,11 @@ class Video(App):
         pos = self.media_time() if self.info else 0
         t0, t1 = fmt_t(pos), fmt_t(dur)
         cv.put(1, y, t0, th.c('text', 'raised'))
+        pl = ' %d/%d ' % (self.pl_index + 1, len(self.playlist)) if len(self.playlist) > 1 else ''
+        if pl:
+            cv.put(1 + len(t0), y, pl, th.c('dim' if not self.pl_open else 'accent', 'raised'))
         cv.put(w - 1 - len(t1), y, t1, th.c('dim', 'raised'))
-        bx = len(t0) + 2
+        bx = len(t0) + len(pl) + 2
         bw = w - bx - len(t1) - 2
         hbar(cv, bx, y, bw, pos / dur if dur else 0, th, bg='field')
         self.zone(bx, y, bw, 1, ('seek', bx, bw))
@@ -650,8 +719,31 @@ class Video(App):
         if x + len(st) + 2 < w:
             cv.put(w - len(st) - 1, y, st, th.c('dim', 'raised'))
 
+    def draw_playlist(self, cv, x, y, w, h):
+        th = self.th
+        focused = self.focused()
+        cv.fill(x, y, 1, h, th.c('text', 'win'))
+        cv.fill(x + 1, y, w - 1, 1, th.c('text', 'raised'))
+        cv.put(x + 2, y, fit('PLAYLIST  %d' % len(self.playlist), w - 3), th.c('dim', 'raised'))
+
+        def row(cv2, rx, ry, rw, p, idx, sel):
+            cur = idx == self.pl_index
+            if cur:
+                a = th.c('on_accent', 'accent')
+            elif sel and focused:
+                a = th.c('bright', 'sel')
+            else:
+                a = th.c('text', 'win')
+            cv2.fill(rx, ry, rw, 1, a)
+            cv2.put(rx, ry, ('>' if cur else ' ') + fit(os.path.basename(p), rw - 2), a)
+        self.pl_list.draw(cv, x + 1, y + 1, w - 1, h - 1, row, th)
+        self.zone(x + 1, y + 1, w - 1, h - 1, 'plist')
+
     def on_click(self, key, ev):
-        if key == 'play':
+        if key == 'plist':
+            if self.pl_list.mouse(ev, ev.y - 1):
+                self.invalidate()
+        elif key == 'play':
             self.toggle()
         elif key == 'rew':
             self.seek(self.media_time() - 10)
@@ -694,6 +786,48 @@ class Video(App):
     def fullscreen(self, on):
         self.set_fullscreen(on)
 
+    # ------------------------------------------------------------ drag and drop
+    def video_paths(self, payload):
+        if payload.get('kind') != 'files':
+            return []
+        return [p for p in payload['paths'] if kind_of(p) == 'video']
+
+    def can_drop(self, payload):
+        return bool(self.video_paths(payload))
+
+    def drop_hint(self, payload, x, y, mods=frozenset()):
+        if payload is None:
+            return None
+        paths = self.video_paths(payload)
+        if not paths:
+            return None
+        if not self.path:
+            return 'play ' + os.path.basename(paths[0])
+        return 'add %d to the playlist' % len(paths) if len(paths) > 1 else \
+            'add ' + os.path.basename(paths[0])
+
+    def on_drop(self, payload, x, y, mods=frozenset()):
+        paths = self.video_paths(payload)
+        if not paths:
+            return None
+        if not self.path:                  # nothing running: start with the first
+            self.play_many(paths)
+            return '%d film(s) queued' % len(paths) if len(paths) > 1 else \
+                'Playing ' + os.path.basename(paths[0])
+        before = len(self.playlist)
+        self.playlist = self.playlist + [p for p in paths if p not in self.playlist]
+        self.pl_list.set_items(self.playlist)
+        self.pl_list.select(self.pl_index)
+        was_open = self.pl_open
+        self.pl_open = len(self.playlist) > 1
+        if was_open != self.pl_open:
+            self.start(self.media_time())  # the picture area changed width
+        else:
+            self.invalidate()
+        added = len(self.playlist) - before
+        return 'Added %d to the playlist (%d)' % (added, len(self.playlist)) if added else \
+            'Already in the playlist'
+
     def on_mouse(self, ev):
         if self.gfx:
             if ev.kind == 'down' and ev.button == 0:
@@ -733,6 +867,13 @@ class Video(App):
             self.audio.volume = max(0, self.audio.volume - 0.1)
         elif k in ('o', 'ctrl+o'):
             self.pick()
+        elif k == 'n':
+            if not self.next_video(1):
+                self.wm.toast('No playlist - drop films onto the player', 'yellow', 3)
+        elif k == 'b':
+            self.next_video(-1)
+        elif k == 'l':
+            self.toggle_playlist()
         else:
             return False
         self.invalidate()

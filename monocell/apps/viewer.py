@@ -53,6 +53,25 @@ class Viewer(App):
         self.every(0.04, self.gfx_tick)
         self.every(0.5, self.gfx_idle)
 
+    # ------------------------------------------------------------ drag and drop
+    def can_drop(self, payload):
+        return payload.get('kind') == 'files' and any(imaging.is_image(p) for p in payload['paths'])
+
+    def drop_hint(self, payload, x, y, mods=frozenset()):
+        if not payload:
+            return None
+        pics = [p for p in payload['paths'] if imaging.is_image(p)]
+        return ('open ' + os.path.basename(pics[0])) if pics else None
+
+    def on_drop(self, payload, x, y, mods=frozenset()):
+        if payload.get('kind') != 'files':
+            return None
+        pics = [p for p in payload['paths'] if imaging.is_image(p)]
+        if not pics:
+            return None
+        self.open(pics[0])
+        return 'Opened ' + os.path.basename(pics[0])
+
     def pick(self):
         self.wm.pick_file(self.open, 'open', start=os.path.join(HOME, 'Pictures') if os.path.isdir(
             os.path.join(HOME, 'Pictures')) else HOME, parent=self.win, title='Open image')
@@ -295,7 +314,7 @@ class Viewer(App):
         look = cfg.get('gfx_look', 'vga')
         look = fbmode.OLD_LOOKS.get(look, look)
         look = look if look in fbmode.LOOKS else 'vga'
-        return look, 1 if self.goriginal else fbmode.SCALE, cfg.get('gfx_dither', 'bayer'), \
+        return look, 1 if self.goriginal else fbmode.SCALE, cfg.get('gfx_dither', 'bayer4'), \
             bool(cfg.get('gfx_scanlines', False))
 
     def gfx_label(self):
@@ -303,7 +322,7 @@ class Viewer(App):
         cw, ch = fbmode.canvas(self.gfx.screen, scale) if self.gfx else (0, 0)
         if self.goriginal:
             return '%s  %dX%d  FULL COLOUR' % (fbmode.ORIGINAL_LABEL, cw, ch)
-        return '%s  %dX%d  %s%s' % (fbmode.LOOKS[look][0], cw, ch, dither,
+        return '%s  %dX%d  %s%s' % (fbmode.LOOKS[look][0], cw, ch, fbmode.dither_name(dither),
                                     '  SCANLINES' if scan else '')
 
     def gfx_note(self, *extra, secs=3.0):
@@ -615,6 +634,8 @@ class Viewer(App):
         cur = cfg.get(key, values[0])
         if key == 'gfx_look':
             cur = fbmode.OLD_LOOKS.get(cur, cur)
+        elif key == 'gfx_dither':
+            cur = fbmode.OLD_DITHERS.get(cur, cur)
         cfg[key] = values[(values.index(cur) + 1) % len(values)] if cur in values \
             else values[0]
         cfg.save()
@@ -628,7 +649,7 @@ class Viewer(App):
             log('viewer gfx: %s' % e)
             return
         tuning = key == 'gfx_look' and cfg[key] == 'vga' and self.tune_palette()
-        self.gfx_note(fbmode.LOOKS[self.gfx_settings()[0]][2] if key == 'gfx_look' else None,
+        self.gfx_note(fbmode.change_note(key, cfg, self.gfx_settings()[0]),
                       'TUNING THE PALETTE...' if tuning else None)
         self.gfx_request()
 

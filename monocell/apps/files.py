@@ -300,6 +300,17 @@ class FileList:
         c = self.current()
         return [c] if c else []
 
+    def entry_at(self, x, y):
+        """The entry under a content cell (None outside the list)."""
+        r = getattr(self.list, 'rect', None)
+        if not r:
+            return None
+        lx, ly, lw, lh = r
+        if not (lx <= x < lx + lw and ly <= y < ly + lh):
+            return None
+        i = self.list.top + (y - ly)
+        return self.entries[i] if 0 <= i < len(self.entries) else None
+
     def draw(self, cv, x, y, w, h, focused, details=True):
         th = self.th
         app = self.app
@@ -323,7 +334,11 @@ class FileList:
 
         def row(cv2, rx, ry, rw, e, idx, sel):
             marked = e.path in self.marked
-            if sel and focused:
+            dropping = getattr(app, 'drop_at', None) == e.path
+            if dropping:                      # the folder a drag would land in
+                a = th.c('accent', 'field')
+                ia = a
+            elif sel and focused:
                 a = th.c('on_accent', 'accent')
                 ia = a
             elif sel:
@@ -404,6 +419,7 @@ class Files(App):
         self.drives = []
         self.drives_key = None
         self.transfer = None
+        self.drop_at = None            # folder highlighted while a drag hovers
         self.refresh_drives()
         self.back_stack = []
         self.fwd_stack = []
@@ -838,11 +854,15 @@ class Files(App):
         clip = getattr(self.wm, 'file_clip', None)
         if not clip:
             return
+        mode, paths = clip
+        self.start_transfer(paths, self.fl.path, move=(mode == 'cut'))
+
+    def start_transfer(self, paths, dest, move=False):
+        """Copy or move a batch into `dest`; the status line shows the progress."""
         if self.transfer and self.transfer.active:
             self.wm.toast('A transfer is still running', 'red')
-            return
-        mode, paths = clip
-        t = transfer.Transfer(paths, self.fl.path, move=(mode == 'cut'))
+            return False
+        t = transfer.Transfer(paths, dest, move=move)
         self.transfer = t
         self.invalidate()
 
@@ -856,8 +876,58 @@ class Files(App):
             t.run()
 
         def done(_):
-            self.transfer_done(t, mode)
+            self.transfer_done(t, 'cut' if move else 'copy')
         self.thread(work, done)
+        return True
+
+    # ------------------------------------------------------------ drag and drop
+    def drag_source(self, x, y):
+        e = self.fl.entry_at(x, y)
+        if e is None:
+            return None
+        sel = self.fl.selection()
+        if not any(s.path == e.path for s in sel):
+            sel = [e]                          # a row that is not marked is dragged alone
+        paths = [s.path for s in sel]
+        return ({'kind': 'files', 'paths': paths},
+                e.name if len(paths) == 1 else '%d items' % len(paths))
+
+    def can_drop(self, payload):
+        return payload.get('kind') == 'files'
+
+    def drop_folder(self, x, y):
+        """Where a drop at (x, y) would go: a folder row under the pointer, else here."""
+        e = self.fl.entry_at(x, y)
+        if e is not None and e.isdir:
+            return e.path
+        return self.fl.path
+
+    def drop_hint(self, payload, x, y, mods=frozenset()):
+        if payload is None or payload.get('kind') != 'files':
+            self.drop_at = None
+            self.invalidate()
+            return None
+        self.drop_at = self.drop_folder(x, y)
+        self.invalidate()
+        return 'into ' + (os.path.basename(self.drop_at.rstrip('/')) or '/')
+
+    def on_drop(self, payload, x, y, mods=frozenset()):
+        if payload.get('kind') != 'files':
+            return None
+        self.drop_at = None
+        paths = [p for p in payload['paths'] if os.path.exists(p)]
+        if not paths:
+            return None
+        dest = self.drop_folder(x, y)
+        if not os.path.isdir(dest):
+            return None
+        move = 'shift' in mods
+        if all(os.path.dirname(p) == dest for p in paths):
+            return 'Already in %s' % (os.path.basename(dest.rstrip('/')) or '/')
+        if not self.start_transfer(paths, dest, move):
+            return None
+        return '%s %d item(s) into %s' % ('Moving' if move else 'Copying', len(paths),
+                                          os.path.basename(dest.rstrip('/')) or '/')
 
     def cancel_transfer(self):
         if self.transfer and self.transfer.active:

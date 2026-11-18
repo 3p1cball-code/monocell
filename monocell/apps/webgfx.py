@@ -252,7 +252,7 @@ class WebGfx:
         look = cfg.get('gfx_look', 'vga')
         look = fbmode.OLD_LOOKS.get(look, look)
         look = look if look in fbmode.LOOKS else 'vga'
-        return (look, 1 if self.original else fbmode.SCALE, cfg.get('gfx_dither', 'bayer'),
+        return (look, 1 if self.original else fbmode.SCALE, cfg.get('gfx_dither', 'bayer4'),
                 bool(cfg.get('gfx_scanlines', False)))
 
     def label(self):
@@ -260,7 +260,7 @@ class WebGfx:
         cw, ch = fbmode.canvas(self.sess.screen, scale)
         if self.original:
             return '%s  %dX%d  FULL COLOUR' % (fbmode.ORIGINAL_LABEL, cw, ch)
-        return '%s  %dX%d  %s%s' % (fbmode.LOOKS[look][0], cw, ch, dither,
+        return '%s  %dX%d  %s%s' % (fbmode.LOOKS[look][0], cw, ch, fbmode.dither_name(dither),
                                     '  SCANLINES' if scan else '')
 
     def note(self, *extra, secs=3.0):
@@ -307,6 +307,8 @@ class WebGfx:
         cur = cfg.get(key, values[0])
         if key == 'gfx_look':
             cur = fbmode.OLD_LOOKS.get(cur, cur)
+        elif key == 'gfx_dither':
+            cur = fbmode.OLD_DITHERS.get(cur, cur)
         cfg[key] = values[(values.index(cur) + 1) % len(values)] if cur in values else values[0]
         cfg.save()
         self.original = False              # a look key means: show me the look
@@ -314,7 +316,7 @@ class WebGfx:
             self.start_pipe()
         except OSError as e:
             self.status = str(e)
-        self.note(fbmode.LOOKS[self.look()[0]][2] if key == 'gfx_look' else None)
+        self.note(fbmode.change_note(key, cfg, self.look()[0]))
         self.refresh()
 
     # ---------------------------------------------------------- frames

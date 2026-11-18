@@ -7,7 +7,7 @@ usage: snap.py COLSxROWS "script" [--args "--open files"] [--out DIR] [--font PA
 
 script: actions separated by ';'
   wait S | sh CMD | key NAME | type TEXT | click X Y | rclick X Y | dclick X Y
-  drag X1 Y1 X2 Y2 | mdrag X1 Y1 X2 Y2 | sdrag X1 Y1 X2 Y2 (shift) | mclick X Y | move X Y | wheel up|down X Y | shot NAME | paste TEXT
+  dragto X Y (move with the button held) | drag X1 Y1 X2 Y2 | mdrag X1 Y1 X2 Y2 | sdrag X1 Y1 X2 Y2 (shift) | mclick X Y | move X Y | wheel up|down X Y | shot NAME | paste TEXT
 """
 import argparse
 import os
@@ -297,7 +297,7 @@ def main():
             parts = step.split(' ', 1)
             cmd = parts[0]
             arg = parts[1] if len(parts) > 1 else ''
-            nums = [int(v) for v in arg.split()] if cmd in ('click', 'rclick', 'dclick', 'mclick', 'drag', 'mdrag', 'sdrag', 'move', 'down', 'up') else []
+            nums = [int(v) for v in arg.split()] if cmd in ('click', 'rclick', 'dclick', 'mclick', 'drag', 'mdrag', 'sdrag', 'move', 'down', 'up', 'dragto') else []
             if cmd == 'wait':
                 time.sleep(float(arg))
             elif cmd == 'sh':                       # e.g. grab the fake framebuffer mid-run
@@ -337,6 +337,8 @@ def main():
                 r.mouse('up', nums[0], nums[1])
             elif cmd == 'move':
                 r.mouse('move', nums[0], nums[1])
+            elif cmd == 'dragto':                 # move with the button still held
+                r.mouse('drag', nums[0], nums[1])
             elif cmd in ('drag', 'mdrag', 'sdrag'):
                 x1, y1, x2, y2 = nums
                 b = {'drag': 0, 'mdrag': 1, 'sdrag': 4}[cmd]

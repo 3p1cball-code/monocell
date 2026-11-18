@@ -115,6 +115,20 @@ class TestGraphs(unittest.TestCase):
             g, _ = self.graph(look)
             self.assertEqual('eq=' in g, look in fbmode.TONE, look)   # grey keeps its levels
 
+    def test_noise_modes_use_ffmpeg_noise(self):
+        g, _ = self.graph('bw', dither='grain')
+        self.assertIn('noise=c0s=', g)              # luma only: no blue and yellow grain
+        self.assertNotIn('blend=all_mode=addition', g)
+        g, _ = self.graph('bw', dither='noise')
+        self.assertIn('blend=all_mode=addition', g)  # random thresholds, same maths as Bayer
+        self.assertNotIn('noise=', g)
+        g, _ = self.graph('ega', dither='grain')
+        self.assertIn('format=yuv444p', g)          # a palette dithers in brightness
+        self.assertIn('paletteuse=dither=none', g)
+        for mode, scale in (('bayer2', 2), ('bayer4', 1), ('bayer8', 0)):
+            g, _ = self.graph('ega', dither=mode)
+            self.assertIn('paletteuse=dither=bayer:bayer_scale=%d' % scale, g)
+
     def test_scanlines(self):
         g, _ = self.graph('ega', scanlines=True)
         self.assertIn('blend=all_mode=multiply', g)
@@ -160,6 +174,51 @@ class TestGraphs(unittest.TestCase):
         self.assertEqual(len(px), 54)
         self.assertLess(max(px), 85)
         self.assertEqual(len(set(px[:4] + px[9:13] + px[18:22] + px[27:31])), 16)
+
+    def test_every_bayer_size_gets_its_own_pattern(self):
+        for n in (2, 4, 8):
+            m = fbmode.bayer_matrix(n)
+            self.assertEqual(len(m), n)
+            self.assertEqual(sorted(v for row in m for v in row), list(range(n * n)))
+            w, h = 16, 8
+            path = fbmode.bayer_file(w, h, 100, n)
+            with open(path, 'rb') as f:
+                px = f.read()[len(b'P5\n16 8\n255\n'):]
+            self.assertEqual(len(px), w * h)
+            self.assertLess(max(px), 100)
+            self.assertEqual(len(set(px)), n * n)      # one threshold per matrix cell
+            for y in range(h):                        # each row repeats its matrix row
+                row = px[y * w:(y + 1) * w]
+                self.assertEqual(row, (row[:n] * (w // n + 1))[:w])
+        self.assertEqual(fbmode.bayer_matrix(2), [[0, 2], [3, 1]])
+        self.assertEqual(fbmode.bayer_matrix(4)[0], [0, 8, 2, 10])
+
+    def test_noise_pattern_has_no_order(self):
+        path = fbmode.noise_file(32, 32, 17)
+        with open(path, 'rb') as f:
+            px = f.read()[len(b'P5\n32 32\n255\n'):]
+        self.assertEqual(len(px), 1024)
+        self.assertLess(max(px), 17)                 # never more than one step
+        self.assertGreater(len(set(px)), 8)          # really random, not a constant
+        # a 4x4 Bayer tile repeats; noise does not
+        b = fbmode.bayer_file(32, 32, 17)
+        with open(b, 'rb') as f:
+            bp = f.read()[len(b'P5\n32 32\n255\n'):]
+        self.assertEqual(bp[:4], bp[4:8])
+        self.assertNotEqual(px[:4], px[4:8])
+
+    def test_dither_pattern_only_for_the_by_hand_modes(self):
+        cols = fbmode.palette_colours('bw')
+        made = {m: fbmode.dither_pattern('bw', m, cols, (1024, 768), 4)
+                for m in fbmode.DITHERS}
+        self.assertIsNone(made['none'])
+        self.assertIsNone(made['grain'])             # ffmpeg's own noise filter
+        self.assertEqual(len({made[m] for m in ('bayer2', 'bayer4', 'bayer8', 'noise')}), 4)
+        self.assertEqual(fbmode.dither_pattern('ega', 'bayer4', fbmode.palette_colours('ega'),
+                                               (1024, 768), 4), None)     # paletteuse does it
+        self.assertEqual(fbmode.dither_name('bayer'), 'BAYER 4')          # old config values
+        self.assertEqual(fbmode.dither_name('grain'), 'GRAIN')
+        self.assertEqual(fbmode.OLD_DITHERS['bayer'], 'bayer4')
 
     def test_colourize_maps_levels_in_brightness_order(self):
         cols = [(0, 0, 0), (255, 85, 255), (85, 255, 255), (255, 255, 255)]
@@ -207,6 +266,15 @@ class TestPipeline(unittest.TestCase):
             got = self.colours(raw)
             self.assertTrue(got <= allowed, (look, got - allowed))
             self.assertGreater(len(got), 1, look)
+
+    def test_every_dither_mode_stays_inside_the_look(self):
+        for look in ('bw', 'grey16', 'ega', 'cga'):
+            allowed = set(fbmode.palette_colours(look))
+            for mode in fbmode.DITHERS:
+                raw, _ = self.frame(look, dither=mode)
+                got = self.colours(raw)
+                self.assertTrue(got <= allowed, (look, mode, got - allowed))
+                self.assertGreaterEqual(len(got), 2 if mode != 'none' else 1, (look, mode))
 
     def test_grey_looks_carry_the_shades_by_dither_only(self):
         """Two colours still show the shades of the picture: the average stays,

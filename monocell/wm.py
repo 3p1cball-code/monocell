@@ -739,6 +739,8 @@ class WM:
         self.dirty = True
         self.drag = None
         self.mouse_capture = None
+        self.dnd = None                 # a drag carrying something between windows
+        self.dnd_hold = None            # pressed on something draggable, not moved yet
         self.last_click = (0, -1, -1, -1)
         self.hover_part = None
         self.mouse_pos = (-1, -1)
@@ -1896,6 +1898,8 @@ class WM:
         for p in self.popups:
             p.draw(cv)
         self.draw_toasts(cv)
+        if self.dnd:
+            self.draw_dnd(cv)
         if self.term.mice:
             mx, my = self.mouse_pos
             if 0 <= mx < self.w and 0 <= my < self.h:
@@ -2523,6 +2527,24 @@ class WM:
         if self.drag:
             self.do_drag(ev)
             return
+        # a drag that carries something between windows: the source app offered a
+        # payload when it was pressed, the app under the pointer decides on release
+        if self.dnd_hold:
+            h = self.dnd_hold
+            if ev.kind == 'up':
+                self.dnd_hold = None            # a plain click, the app already has it
+            elif ev.kind == 'drag' and abs(mx - h['x']) + abs(my - h['y']) >= 2:
+                self.promote_dnd(mx, my)
+                return
+        if self.dnd:
+            if ev.kind == 'drag':
+                self.dnd['x'], self.dnd['y'] = mx, my
+                self.update_dnd_target()
+                self.dirty = True
+                return
+            if ev.kind == 'up':
+                self.finish_dnd(ev)
+                return
         # captured app (button held inside content)
         if self.mouse_capture and ev.kind in ('drag', 'up'):
             win = self.mouse_capture
@@ -2618,6 +2640,12 @@ class WM:
                     self.mouse_capture = win if ev.button == 0 else None
                     npop = len(self.popups)
                     used = win.app.on_mouse(ev.moved(win.x + 1, win.y + 1))
+                    if ev.button == 0:          # anything to drag out of this window?
+                        ox, oy = self.content_origin(win)
+                        off = win.app.drag_source(mx - ox, my - oy)
+                        if off:
+                            self.dnd_hold = {'x': mx, 'y': my, 'win': win, 'app': win.app,
+                                             'payload': off[0], 'label': off[1]}
                     if ev.button == 2 and not used and len(self.popups) == npop:
                         self.edit_menu(win, mx, my)
             elif ev.button == 0:
@@ -2671,6 +2699,110 @@ class WM:
             self.open_panel('brightness', ev.x)
         elif key == 'sound':
             self.open_panel('volume', ev.x)
+
+    def promote_dnd(self, mx, my):
+        """The press turned into a drag: stop the source's mouse capture, carry the
+        payload, and let the window under the pointer say whether it takes it."""
+        h = self.dnd_hold
+        self.dnd = dict(h, x=mx, y=my, target=None)
+        self.dnd_hold = None
+        self.mouse_capture = None
+        if h.get('app') is not None:
+            h['app'].pressed = None          # it will never see the release
+        self.update_dnd_target()
+        self.dirty = True
+
+    def update_dnd_target(self):
+        """While dragging: the window under the pointer, if it takes the payload.
+
+        The target also gets a say in the label ('into Videos'): it alone knows
+        where inside its window the drop would land."""
+        d = self.dnd
+        win = self.window_at(d['x'], d['y'])
+        app = win.app if win is not None and not win.minimized else None
+        try:
+            ok = bool(app and app.can_drop(d['payload']))
+        except Exception:                  # an app must never break the drag
+            ok = False
+        if not ok:
+            app = None
+        if app is not d.get('hint_app') and d.get('hint_app') is not None:
+            try:
+                d['hint_app'].drop_hint(None, -1, -1, frozenset())
+            except Exception:
+                pass
+            self.dirty = True
+        d['hint_app'] = app
+        if app is not None:
+            ox, oy = self.content_origin(win)
+            x = max(0, min(win.cw - 1, d['x'] - ox))
+            y = max(0, min(win.ch - 1, d['y'] - oy))
+            try:
+                hint = app.drop_hint(d['payload'], x, y, frozenset())
+            except Exception:
+                hint = None
+            if hint != d.get('hint'):
+                d['hint'] = hint
+                self.dirty = True
+        d['target'] = win if app is not None else None
+
+    def finish_dnd(self, ev):
+        d, self.dnd = self.dnd, None
+        self.dirty = True
+        app = d.get('hint_app')
+        if app is not None:
+            try:
+                app.drop_hint(None, -1, -1, frozenset())
+            except Exception:
+                pass
+        win = self.window_at(ev.x, ev.y)
+        if win is None or not win.app or win.minimized:
+            self.toast('Nothing here - drop it on a folder or a player', 'yellow', 4)
+            return
+        ox, oy = self.content_origin(win)
+        x = max(0, min(win.cw - 1, ev.x - ox))
+        y = max(0, min(win.ch - 1, ev.y - oy))
+        try:
+            takes = win.app.can_drop(d['payload'])
+        except Exception:
+            takes = False
+        if not takes:
+            self.toast('%s does not take %s' % (win.title, d['label']), 'yellow', 3)
+            return
+        try:
+            res = win.app.on_drop(d['payload'], x, y, ev.mods)
+        except Exception as e:             # a broken app must not eat the pointer
+            log('drop on %s: %s' % (win.app.name, e))
+            self.toast('Drop failed: %s' % e, 'red', 6)
+            return
+        if res:
+            self.toast(res, 'green', 4)
+
+    def draw_dnd(self, cv):
+        """A drag in progress: who would take it, and what is being carried."""
+        th = self.theme
+        d = self.dnd
+        t = d.get('target')
+        if t is not None:
+            x, y, w, h = t.rect()
+            if not t.borderless:
+                x, y, w, h = x + 1, y + 1, w - 2, h - 2
+            if w > 2 and h > 2:
+                acc = th.r['accent']
+
+                def hl(a):
+                    return (a & ~0xf0) | (acc << 4)      # background only, keep the text
+
+                for yy in (y, y + h - 1):
+                    cv.recolor(x, yy, w, 1, hl)
+                for xx in (x, x + w - 1):
+                    cv.recolor(xx, y, 1, h, hl)
+        text = ' ' + fit(d.get('hint') or d.get('label') or 'drag', 30) + ' '
+        w = min(len(text), self.w - 2)
+        x = min(d['x'] + 1, max(0, self.w - w - 1))
+        y = min(d['y'] + 1, self.h - 2)
+        cv.fill(x, y, w, 1, th.c('on_accent', 'accent'))
+        cv.put(x, y, text[:w], th.c('on_accent', 'accent'))
 
     def do_drag(self, ev):
         d = self.drag
@@ -2814,6 +2946,8 @@ class WM:
 
 
 HELP_TEXT = """Mouse: drag title bars to move, drag edges/corners to resize, double-click a title to maximize. Drag a window to the screen top to maximize, to the left/right edge to tile half, to a corner for a quarter. Alt+drag moves from anywhere. Right-click title bars, the taskbar or the desktop for menus.
+
+Drag and drop: press on a file in Files and drag it onto a folder entry to copy it there (Shift: move), onto the video player to play it (more films build a playlist), onto the music player, the picture viewer, a terminal (types the path) or another Files window.
 
 F12 / Alt+Space   start menu (categories open to the right; type to search)
 Alt+Tab / Alt+N   next window      Alt+P  previous

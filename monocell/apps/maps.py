@@ -69,7 +69,7 @@ class Maps(App):
         look = cfg.get('gfx_look', 'vga')
         look = fbmode.OLD_LOOKS.get(look, look)
         look = look if look in fbmode.LOOKS else 'vga'
-        dither = cfg.get('gfx_dither', 'bayer')
+        dither = cfg.get('gfx_dither', 'bayer4')
         scale = 1 if self.goriginal else fbmode.SCALE
         return look, scale, dither, bool(cfg.get('gfx_scanlines', False))
 
@@ -78,7 +78,7 @@ class Maps(App):
         cw, ch = fbmode.canvas(self.gfx.screen, scale) if self.gfx else (0, 0)
         if self.goriginal:
             return '%s  %dX%d  FULL COLOUR' % (fbmode.ORIGINAL_LABEL, cw, ch)
-        return '%s  %dX%d  %s%s' % (fbmode.LOOKS[look][0], cw, ch, dither,
+        return '%s  %dX%d  %s%s' % (fbmode.LOOKS[look][0], cw, ch, fbmode.dither_name(dither),
                                     '  SCANLINES' if scan else '')
 
     def source(self):
@@ -502,6 +502,8 @@ class Maps(App):
         cur = cfg.get(key, values[0])
         if key == 'gfx_look':
             cur = fbmode.OLD_LOOKS.get(cur, cur)
+        elif key == 'gfx_dither':
+            cur = fbmode.OLD_DITHERS.get(cur, cur)
         cfg[key] = values[(values.index(cur) + 1) % len(values)] if cur in values \
             else values[0]
         cfg.save()
@@ -512,7 +514,7 @@ class Maps(App):
         except OSError as e:
             self.err = str(e)
             return
-        self.note(fbmode.LOOKS[self.settings()[0]][2] if key == 'gfx_look' else None)
+        self.note(fbmode.change_note(key, cfg, self.settings()[0]))
         self.request_render()
 
     def set_original(self, on, restart=True):

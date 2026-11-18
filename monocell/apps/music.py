@@ -131,6 +131,33 @@ class Music(App):
         self.player.stop()
         return True
 
+    # ------------------------------------------------------------ drag and drop
+    def audio_paths(self, payload):
+        if payload.get('kind') != 'files':
+            return []
+        return [p for p in payload['paths'] if kind_of(p) == 'audio']
+
+    def can_drop(self, payload):
+        return bool(self.audio_paths(payload))
+
+    def drop_hint(self, payload, x, y, mods=frozenset()):
+        paths = self.audio_paths(payload) if payload else []
+        if not paths:
+            return None
+        return 'play ' + os.path.basename(paths[0]) if len(paths) == 1 else \
+            'play 1, add %d' % (len(paths) - 1)
+
+    def on_drop(self, payload, x, y, mods=frozenset()):
+        paths = self.audio_paths(payload)
+        if not paths:
+            return None
+        items = list(self.list.items)
+        items += [p for p in paths if p not in items]
+        self.list.set_items(items)
+        self.list.select(items.index(paths[0]))
+        self.play_path(paths[0])
+        return '%s  (%d in the list)' % (os.path.basename(paths[0]), len(items))
+
     # ------------------------------------------------------------ draw
     def draw(self, cv, focused):
         th = self.th
