@@ -299,6 +299,8 @@ monocell-clip --clear
   | `CGA 4` | Schwarz, Magenta, Cyan, Weiß – nach Helligkeit verteilt |
   | `AMBER` | Bernstein-Monitor: Schwarz, Glimmen, Bernstein, Lichter brennen fast weiß aus |
   | `GREEN` | grüner Phosphor-Monitor, ebenso mit fast weißen Lichtern |
+  | `B/W 2` | nur Schwarz und Weiß – jede Abstufung entsteht allein aus dem 4×4-Bayer-Dithering |
+  | `GREY 16` | Schwarz, Weiß und 14 gleichabständige Graustufen, dazwischen gedithert |
 
   Tasten im Grafikmodus: `c` Look, `d` Dithering an/aus, `s` Scanlines, `o` Original
   (volle Auflösung und Farbe, ohne Palette – für Texte und Details),

@@ -1,6 +1,6 @@
 """Settings: appearance editor (palette + element colours), desktop/media/web/calendar options."""
 from ..app import App
-from .. import gcal, startup
+from .. import fbmode, gcal, startup
 from ..theme import (PRESETS, PRESET_FONTS, available_fonts, delete_theme,
                      save_theme, saved_themes)
 from ..util import fit
@@ -57,8 +57,7 @@ OPTIONS = {
          [8, 10, 12, 15, 20, 24, 25, 30, 40, 50, 60, 75, 90, 100, 120, 144, 165, 240]),
         ('av_offset', 'A/V offset ms (negative = picture earlier)',
          [-160, -120, -80, -40, 0, 40, 80, 120]),
-        ('gfx_look', 'Graphics mode look (g in the player)',
-         ['vga', 'ega', 'theme', 'cga', 'amber', 'green']),
+        ('gfx_look', 'Graphics mode look (g in the player)', list(fbmode.LOOK_ORDER)),
         ('gfx_dither', 'Graphics dithering', ['bayer', 'none']),
         ('gfx_scanlines', 'Graphics scanlines', [False, True]),
         ('gfx_fps', 'Graphics frame rate (0 = auto)', [0, 12, 15, 20, 25, 30]),

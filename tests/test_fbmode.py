@@ -102,13 +102,18 @@ class TestGraphs(unittest.TestCase):
             self.assertNotIn('palettegen', g)          # per-frame palettes were too slow
 
     def test_luma_looks_dither_by_hand(self):
-        for look in ('cga', 'amber', 'green'):
+        for look in fbmode.LUMA_LOOKS:
             g, _ = self.graph(look)
             self.assertIn('format=gray', g)
             self.assertIn('blend=all_mode=addition', g)
             self.assertIn('lutrgb=', g)
             g, _ = self.graph(look, dither='none')
             self.assertNotIn('blend', g)
+
+    def test_only_the_monitors_get_a_tone_curve(self):
+        for look in fbmode.LUMA_LOOKS:
+            g, _ = self.graph(look)
+            self.assertEqual('eq=' in g, look in fbmode.TONE, look)   # grey keeps its levels
 
     def test_scanlines(self):
         g, _ = self.graph('ega', scanlines=True)
@@ -124,6 +129,20 @@ class TestGraphs(unittest.TestCase):
             self.assertEqual(lum, sorted(lum), look)                  # darkest to brightest
         self.assertIn('amber', fbmode.LOOKS)
         self.assertEqual(fbmode.OLD_LOOKS['herc'], 'amber')
+
+    def test_grey_looks_are_neutral_and_evenly_spaced(self):
+        bw = fbmode.palette_colours('bw')
+        self.assertEqual(bw, [(0, 0, 0), (255, 255, 255)])
+        self.assertEqual(fbmode.LOOKS['bw'][1], 2)
+        grey = fbmode.palette_colours('grey16')
+        self.assertEqual(len(grey), 16)                   # black, white and 14 steps
+        self.assertEqual(grey, [(v, v, v) for v in fbmode.grey_levels(16)])
+        self.assertEqual([c[0] for c in grey], sorted(range(0, 256, 17)))
+        self.assertEqual(fbmode.LOOKS['grey16'][1], 16)
+        for look in ('bw', 'grey16'):                      # offered by every graphics app
+            self.assertIn(look, fbmode.LOOK_ORDER)
+            self.assertIn(look, fbmode.LUMA_LOOKS)
+            self.assertNotIn(look, fbmode.TONE)
 
     def test_palette_files(self):
         path = fbmode.palette_file(fbmode.palette_colours('cga'))
@@ -182,12 +201,26 @@ class TestPipeline(unittest.TestCase):
         return {(raw[i + 2], raw[i + 1], raw[i]) for i in range(0, len(raw), 4)}
 
     def test_only_adapter_colours(self):
-        for look in ('ega', 'cga', 'amber', 'green'):
+        for look in ('ega', 'cga', 'amber', 'green', 'bw', 'grey16'):
             raw, _ = self.frame(look)
             allowed = set(fbmode.palette_colours(look, None, (255, 138, 28)))
             got = self.colours(raw)
             self.assertTrue(got <= allowed, (look, got - allowed))
             self.assertGreater(len(got), 1, look)
+
+    def test_grey_looks_carry_the_shades_by_dither_only(self):
+        """Two colours still show the shades of the picture: the average stays,
+        and the sixteen grey look really uses its levels instead of flat areas."""
+        raw, (cw, ch) = self.frame('bw')
+        self.assertEqual(self.colours(raw), {(0, 0, 0), (255, 255, 255)})
+        mean = sum(raw[i] for i in range(0, len(raw), 4)) / (W * 4 * H * 4)
+        self.assertGreater(mean, 40)                 # not a black or a white page
+        self.assertLess(mean, 215)
+        raw, _ = self.frame('grey16')
+        got = self.colours(raw)
+        self.assertGreater(len(got), 2)              # the steps are used
+        self.assertLessEqual(len(got), 16)
+        self.assertIn((0, 0, 0), got)
 
     def test_vga_uses_a_256_colour_palette(self):
         raw, _ = self.frame('vga')

@@ -44,20 +44,27 @@ LOOKS = {
     'cga': ('CGA 4', 4, 'black, cyan, magenta and white'),
     'amber': ('AMBER', 4, 'amber monochrome monitor, highlights burn to white'),
     'green': ('GREEN', 4, 'green phosphor monitor, highlights burn to white'),
+    'bw': ('B/W 2', 2, 'black and white: every shade comes out of the dithering alone'),
+    'grey16': ('GREY 16', 16, 'black, white and 14 steps of grey, dithered in between'),
 }
-LOOK_ORDER = ['vga', 'ega', 'theme', 'cga', 'amber', 'green']
+LOOK_ORDER = ['vga', 'ega', 'theme', 'cga', 'amber', 'green', 'bw', 'grey16']
 OLD_LOOKS = {'herc': 'amber'}                       # names of earlier versions
 # monochrome monitors, darkest to brightest: off, glow, phosphor, burnt-out highlight
 PHOSPHOR = {
     'amber': [(0, 0, 0), (122, 72, 0), (255, 170, 0), (255, 240, 205)],
     'green': [(0, 0, 0), (12, 104, 36), (51, 255, 102), (226, 255, 230)],
 }
+# the grey looks keep the colour of the picture out of it: black, white and
+# fourteen evenly spaced steps between them - no tint, no contrast curve
+GREY = {'bw': [(0, 0, 0), (255, 255, 255)],
+        'grey16': [(v, v, v) for v in range(0, 256, 17)]}
 # Two and four colours work on brightness, as monochrome and CGA conversions did:
 # the picture becomes grey, is dithered to evenly spaced grey levels and every
 # level is then coloured (darkest to brightest). Nearest-RGB matching would turn
 # a dark blue night into solid orange or magenta.
-LUMA_LOOKS = ('cga', 'amber', 'green')
+LUMA_LOOKS = ('cga', 'amber', 'green', 'bw', 'grey16')
 # the monitors get more contrast, so that bright parts really reach the white
+# (the grey looks deliberately get none: their steps are what the picture measured)
 TONE = {'cga': 'eq=gamma=1.25:contrast=1.15',
         'amber': 'eq=gamma=1.1:contrast=1.3', 'green': 'eq=gamma=1.1:contrast=1.3'}
 # a smaller bayer_scale is a stronger ordered dither: few colours need it to carry shades
@@ -319,6 +326,8 @@ def palette_colours(look, theme_rgb=None, accent=None):
         return list(theme_rgb or [hex_rgb(h) for h in EGA])
     if look in PHOSPHOR:
         return list(PHOSPHOR[look])
+    if look in GREY:
+        return list(GREY[look])
     raise ValueError('unknown look: %s' % look)
 
 
@@ -402,8 +411,10 @@ def build(video, screen, line_px, pix_fmt, look='vga', scale=SCALE, dither='baye
         # ordered dither by hand: add a Bayer threshold, round down to the grey levels
         n = len(colours)
         step = 255 // (n - 1)
-        g = ['[0:v]%sscale=%d:%d:flags=%s,setsar=1,format=gray,%s,'
-             'pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black[g]' % (pre, fw, fh, down, TONE[look], cw, ch)]
+        tone = TONE.get(look)              # the monitors get a contrast lift, grey none
+        g = ['[0:v]%sscale=%d:%d:flags=%s,setsar=1,format=gray,%s'
+             'pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black[g]'
+             % (pre, fw, fh, down, tone + ',' if tone else '', cw, ch)]
         if dither == 'bayer':
             inputs.append(pattern)
             g.append('[g][1:v]blend=all_mode=addition[gd]')

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Two grey looks in the graphics mode.** `B/W 2` keeps nothing but black and
+  white: every shade comes out of the 4×4 Bayer dithering alone (a 1-bit picture
+  with seventeen apparent steps, like a printed page), `GREY 16` keeps black,
+  white and fourteen evenly spaced steps of grey and dithers between them. Both
+  work on brightness only - no tint, and unlike the amber and green monitors no
+  contrast curve either, so the picture keeps the brightness it measured. `c`
+  cycles through them in the video player, the picture viewer, the maps and the
+  browser; Settings → Images & video lists them as well.
+
 - **Console games on Fedora/Nobara.** The Games menu only looked for a binary at
   its Debian path (`/usr/games/...`), so on the Yoga and the workstation every
   entry said "not installed" although the menu was there. A command is now tried
