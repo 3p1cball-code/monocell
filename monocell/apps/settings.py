@@ -335,6 +335,10 @@ class Settings(AppearanceMixin, App):
                 if key == 'famagic_range':
                     from .. import famagic_widget
                     s = famagic_widget.RANGE_LABELS.get(val, s)
+                if key == 'gfx_look':
+                    s = fbmode.LOOKS.get(val, (s,))[0]
+                elif key == 'gfx_dither':
+                    s = fbmode.dither_name(val)
                 a = th.c('on_accent', 'accent') if hov or on else th.c('accent', 'raised')
                 cv.put(vx, y, ' < %s > ' % s, a)
                 self.zone(vx, y, len(s) + 6, 1, ('opt', key))
@@ -577,6 +581,10 @@ class Settings(AppearanceMixin, App):
                     self.sync_calendar()
                 elif isinstance(kind, list):
                     cur = self.cfg.get(k)
+                    if k == 'gfx_dither':          # values from earlier versions
+                        cur = fbmode.OLD_DITHERS.get(cur, cur)
+                    elif k == 'gfx_look':
+                        cur = fbmode.OLD_LOOKS.get(cur, cur)
                     i = kind.index(cur) if cur in kind else -1
                     self.cfg[k] = kind[(i + d) % len(kind)]
                     self.apply_sound() if k == 'audio_sink' else self.apply()

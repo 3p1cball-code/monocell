@@ -342,8 +342,8 @@ DEFAULT_CONFIG = {
     'writer_font3': 'block3d',    # default FIGlet font for <size3>/H1 (per document)
     'dither': 'bayer4',           # bayer4 | bayer8 | fs | none
     'video_mode': 'pixel',
-    'gfx_look': 'vga',            # graphics mode (Linux console): vga|ega|theme|cga|amber|green
-    'gfx_dither': 'bayer',        # bayer | none
+    'gfx_look': 'vga',            # graphics mode (Linux console): vga|ega|theme|cga|amber|green|bw|grey16
+    'gfx_dither': 'bayer4',       # bayer2|bayer4|bayer8|noise|grain|none (old 'bayer' means bayer4)
     'gfx_scanlines': False,
     'gfx_fps': 0,                 # 0 = auto (25; never above the video's own rate)
     'map_tiles': 'osm',           # osm|osmde|light|dark|topo or an own {z}/{x}/{y} URL
