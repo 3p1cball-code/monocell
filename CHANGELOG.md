@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **The map has a rain radar (`w`).** The German weather service's radar composite
+  RV (one kilometre, all of Germany plus a ring around it, three days of analysis
+  and a two-hour nowcast, a frame every five minutes) is laid over the tiles as a
+  transparent layer: one WMS `GetMap` in EPSG:3857 per view, in the fifteen class
+  colours of the DWD legend, no key and no account. The classes are not painted
+  solid but **graded by strength** (drizzle 4 %, downpour 100 %, `radar.ALPHA`) -
+  at a quarter resolution even 0.2 mm/h otherwise washes a whole city green, which
+  was measured against Hamburg (drizzle only) and Mainz (a real rain band). For the
+  `VGA 256` look the fifteen classes and their blends join the map palette
+  (`maps.map_palette(radar.RAMP)`), so a rain band keeps its colour instead of
+  dithering into the woods; the other looks dither the classes into their own
+  palettes. A legend panel above the status bar shows the ramp, its mm/h ticks, the
+  frame time and how far it is from now, `,` / `.` step through the nowcast from
+  -2 h to +2 h, `n` jumps back to now, and the nowcast advances by itself (a new
+  frame every five minutes, checked every 20 s). The valid times and the covered
+  area come from the server's capabilities (~1 MB, once per start and then every half
+  hour, carried on locally in between - the server measured 0.2 to 20 s per answer); each
+  picture is fetched for twice the canvas around a centre snapped to half a tile,
+  so panning cuts new views out of the same download instead of asking the DWD for
+  every key press. Frames are cached under `~/.cache/monocell/radar/` (~30 kB each,
+  240 kept) and are then there offline; fetching runs in the background while the
+  old picture stays, the map never waits. Outside the DWD's range the panel says
+  `NUR UEBER DEUTSCHLAND`. On by `w`, remembered as `map_radar` in the config and
+  in Settings -> Maps. Data: (c) Deutscher Wetterdienst, CC BY 4.0.
+
 - **Dithering with a choice.** `d` in the graphics mode used to be an on/off:
   the hand-made 4×4 Bayer matrix or nothing. It now cycles through `BAYER 2`
   (four thresholds, coarse and very visible), `BAYER 4` (sixteen, the classic and

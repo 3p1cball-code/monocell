@@ -350,6 +350,7 @@ DEFAULT_CONFIG = {
     'map_lat': 52.5200,           # last map position
     'map_lon': 13.4050,
     'map_zoom': 12,
+    'map_radar': False,           # rain radar layer over the map (DWD RV)
     'cell_aspect': 0.0,           # 0 = auto (h/w ratio of a cell, usually ~2)
     'video_fps': 15,
     'av_offset': 0,               # ms; negative shows the picture earlier than the sound

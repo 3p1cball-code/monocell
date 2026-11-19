@@ -68,6 +68,7 @@ OPTIONS = {
     'maps': [
         ('map_tiles', 'Tile source (preset or {z}/{x}/{y} URL)', 'text'),
         ('map_zoom', 'Zoom (2-19)', list(range(2, 20))),
+        ('map_radar', 'Rain radar layer, DWD (w in the map)', [False, True]),
     ],
     'web': [
         ('web_images', 'Show images', [False, True]),

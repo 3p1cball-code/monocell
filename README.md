@@ -362,6 +362,9 @@ monocell-clip --clear
   | `c` `d` `s` | Look, Dithering, Scanlines (wie im Player) |
   | `o` | Original: volle Auflösung und Farbe (zwei Zoomstufen höher, gleicher Ausschnitt) |
   | `t` | Kachelquelle wechseln (OSM, OSM DE, Carto Light/Dark, OpenTopoMap) |
+  | `w` | Regenradar an/aus (DWD, wird gemerkt) |
+  | `,` `.` | Radarzeit −/+ 10 Minuten (−2 h … +2 h, Nowcast) |
+  | `n` | Radarzeit zurück auf jetzt |
   | `r` | Kacheln neu laden · `h` Berlin · `g`/`Esc` zurück |
 
   Sucht über **Nominatim**, bevorzugt rund um den sichtbaren Ausschnitt (`viewbox`,
@@ -374,6 +377,36 @@ monocell-clip --clear
   HUD unten: Zoomstufe, Koordinaten, Maßstabsbalken, Attribution; ein Fadenkreuz
   markiert das Ziel einer Suche. Gemessen auf dem X61s: Canvas 0,3 ms, ein Bild durch
   die Filterskette 26 ms (VGA) bzw. 24 ms (CGA) → ~30 fps beim Panen.
+
+  ![Regenradar über Mainz: Regenband in Gelb und Orange, Karte bleibt lesbar](screenshots/maps-radar.png)
+
+  **Regenradar (`w`).** Der **Radarkomposit RV des DWD** (Deutscher Wetterdienst) als
+  transparente Schicht über der Karte: 1 km Auflösung, ganz Deutschland plus einen Ring
+  ringsum, Analyse plus **Nowcast zwei Stunden voraus**, ein Bild alle fünf Minuten.
+  Ein `GetMap` pro Ausschnitt in EPSG:3857 liefert das Bild in den fünfzehn
+  Klassenfarben der DWD-Legende (0,1 bis ≥150 mm/h); ohne Schlüssel, ohne Anmeldung.
+  Die Klassen werden nicht deckend gemalt, sondern
+  **nach Stärke abgestuft** (Niesel 4 %, Starkregen 100 %, `radar.ALPHA`): bei einem
+  Viertelauflösungsbild wäscht sonst schon 0,2 mm/h die ganze Stadt grün – an Hamburg
+  und Mainz ausgemessen. Für den Look `VGA 256` wandern die fünfzehn Klassen samt
+  Zwischentönen zusätzlich in die Kartensatz-Palette (`maps.map_palette(radar.RAMP)`),
+  damit ein Regenband seine Farbe behält statt in Waldgrün zu dithern; andere Looks
+  dithern die Klassen in ihre eigene Palette. Das Legendenfeld unten rechts zeigt
+  Rampenstufe, Uhrzeit und Abstand zu jetzt (`JETZT`, `-1:10`, `+0:40`).
+
+  Die gültigen Zeiten und das Abdeckungsgebiet kommen aus den Capabilities des
+  DWD-GeoServers (~1 MB, einmal pro Start und dann alle 30 Minuten; die Zeitachse läuft
+  drei Tage zurück und zwei Stunden voraus). Dazwischen wird das Nowcast-Ende einfach mit
+  der Uhr fortgeschrieben und zusammen mit den Bildern gespeichert - der Server antwortet
+  gemessen in 0,2 bis 20 s, da fragt man nicht für jede Taste. Abgefragt wird **doppelt so groß wie der Bildschirm** um
+  einen auf eine halbe Kachel gerasteten Mittelpunkt: ein paar Pfeiltasten panen dann
+  aus demselben Bild, statt für jeden Tastendruck neu zu fragen. Bilder liegen unter
+  `~/.cache/monocell/radar/` (~30 kB, 240 Stück) und sind danach offline da; geholt
+  wird im Hintergrund, solange das alte Bild steht – die Karte blockiert nie. Der
+  Nowcast schiebt sich von selbst weiter (alle 20 s geprüft, neues Bild alle 5 min).
+  Ausserhalb der DWD-Abdeckung sagt das Feld „NUR UEBER DEUTSCHLAND“.
+  Daten: © Deutscher Wetterdienst, `maps.dwd.de`, frei nutzbar (CC BY 4.0); der
+  Kartenstil bleibt OSM bzw. der gewählten Quelle.
 * **YouTube** – Suche über `yt-dlp` (auch Video-Links), Ergebnisliste mit Thumbnail,
   Kanal, Dauer und Aufrufen; Wiedergabe lädt max. 480p in den Cache und öffnet den
   Video-Player. **Für dich** (Button, `F3`) zeigt die persönlichen Vorschläge des

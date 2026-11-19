@@ -76,13 +76,17 @@ def _clamp(v):
     return 0 if v < 0 else 255 if v > 255 else int(round(v))
 
 
-def map_palette():
+def map_palette(extra=()):
     """256 colours clustered around the map palette.
 
     Flat map areas are the whole picture, so the palette has to be dense around
     paper, water, green and the road fills: the ordered dither may then only mix
     neighbours that are a hair apart, and large areas stay clean. An even spread
     of greys covers the label antialiasing without pulling the paper to grey.
+
+    `extra` takes colours that have to survive the dither as themselves - the
+    rain radar's fifteen classes, with a blend between each pair, so a shower
+    keeps its class instead of mixing into the greens of the woods.
     """
     cols = []
     seen = set()
@@ -93,6 +97,11 @@ def map_palette():
             seen.add(c)
             cols.append(c)
 
+    extra = [tuple(c) for c in extra]
+    for c in extra:
+        add(c)
+    for a, b in zip(extra, extra[1:]):
+        add([(a[i] + b[i]) / 2.0 for i in range(3)])
     for c in MAP_COLOURS:
         add(c)
     for k in SHADES:
@@ -114,10 +123,10 @@ def map_palette():
 MAP_VGA = map_palette()
 
 
-def palette_path():
+def palette_path(extra=()):
     """Cached 16x16 PPM of the map palette (fbmode.palette_file writes it on demand)."""
     from . import fbmode
-    return fbmode.palette_file(MAP_VGA)
+    return fbmode.palette_file(map_palette(extra) if extra else MAP_VGA)
 
 
 # ------------------------------------------------------------------ mercator
@@ -387,13 +396,21 @@ class MapView:
 BG = (242, 239, 233)
 
 
-def compose(view, store, background=BG):
-    """The canvas as a PIL image (RGB). Missing tiles stay the background colour."""
+def compose(view, store, background=BG, radar=None):
+    """The canvas as a PIL image (RGB). Missing tiles stay the background colour.
+
+    `radar` is a same-sized RGBA picture on top (the rain radar); its alpha says
+    how much of the map its class hides, so drizzle tints the map and a downpour
+    covers it."""
     img = Image.new('RGB', (view.width, view.height), background)
     for z, x, y, px, py in view.visible_tiles():
         t = store.get(z, x, y)
         if t is not None:
             img.paste(t, (px, py))
+    if radar is not None:
+        if radar.size != img.size:
+            radar = radar.resize(img.size, Image.NEAREST)
+        img = Image.alpha_composite(img.convert('RGBA'), radar).convert('RGB')
     return img
 
 
