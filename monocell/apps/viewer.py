@@ -13,7 +13,7 @@ from ..util import HOME, ascii_upper, fit, human_size, log
 from ..widgets import button
 
 MODES = ['blend', 'pixel', 'grey', 'ascii', 'mono']
-DITHERS = ['bayer4', 'bayer8', 'fs', 'none']
+DITHERS = imaging.DITHERS
 
 
 class Viewer(App):

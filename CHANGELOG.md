@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The ASCII look dithers its colours.** `ascii` art put one palette colour on
+  every cell - the nearest hue - so a sky or a skin tone jumped between two entries
+  in hard bands. Now the two palette entries that bracket a colour are mixed from
+  cell to cell with the ordered matrix: the cells alternate, the way a sixteen
+  colour picture has to. The brighter glyph keeps carrying the brightness. `d`
+  cycles the dither in the video player too (`bayer4`, `bayer8`, `fs`, `none`; the
+  picture viewer already had it, where it now really does something in `ascii`), and
+  the player's button bar shows the current mode next to the render mode. `pixel`
+  keeps its error diffusion, `blend` its ordered matrix, both unchanged.
+
 - **The map has a rain radar (`w`).** The German weather service's radar composite
   RV (one kilometre, all of Germany plus a ring around it, three days of analysis
   and a two-hour nowcast, a frame every five minutes) is laid over the tiles as a

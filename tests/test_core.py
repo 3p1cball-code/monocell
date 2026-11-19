@@ -396,6 +396,42 @@ class TestThemeAndImaging(unittest.TestCase):
                 self.assertIn(a & 15, imaging.GREYS)
                 self.assertIn((a >> 4) & 15, imaging.GREYS)
 
+    def test_ascii_colour_is_dithered(self):
+        """A colour between two palette entries is mixed from cell to cell.
+
+        ASCII art has one foreground colour per cell and the background stays the
+        window's, so the only way to show a colour between two palette entries is
+        an ordered pattern: half the cells get the first entry, half the second."""
+        cfg = Config()
+        th = Theme(cfg)
+        wm = type('W', (), {'theme': th, 'cfg': cfg,
+                            'term': type('T', (), {'allowed_bg': list(range(16)),
+                                                   'cell_aspect': 2.0})()})()
+        a, b = th.rgb[1], th.rgb[4]
+        mix = bytes(int((a[k] + b[k]) / 2) for k in range(3)) * 64
+        imaging._renderer = None
+        flat = imaging.render(wm, mix, 8, 8, 'ascii', 'none')
+        dith = imaging.render(wm, mix, 8, 8, 'ascii', 'bayer4')
+        one = {x & 15 for _c, ats in flat for x in ats}
+        many = {x & 15 for _c, ats in dith for x in ats}
+        self.assertEqual(len(one), 1)                 # without dither: one colour
+        self.assertGreater(len(many), 1)              # with dither: two alternating
+        self.assertTrue(many <= {x & 15 for x in [*one]} | many)
+
+    def test_ascii_dither_bayer8_is_finer(self):
+        cfg = Config()
+        th = Theme(cfg)
+        wm = type('W', (), {'theme': th, 'cfg': cfg,
+                            'term': type('T', (), {'allowed_bg': list(range(16)),
+                                                   'cell_aspect': 2.0})()})()
+        a, b = th.rgb[2], th.rgb[6]
+        mix = bytes(int(a[k] * 0.6 + b[k] * 0.4) for k in range(3)) * 256
+        imaging._renderer = None
+        b4 = imaging.render(wm, mix, 16, 16, 'ascii', 'bayer4')
+        b8 = imaging.render(wm, mix, 16, 16, 'ascii', 'bayer8')
+        share = lambda rows: sum(x & 15 == (rows[0][1][0] & 15) for _c, ats in rows for x in ats)
+        self.assertNotEqual(share(b4), share(b8))     # different pattern, same mix
+
     def test_palette_bg_restriction(self):
         cfg = Config()
         th = Theme(cfg)

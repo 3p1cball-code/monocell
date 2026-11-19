@@ -18,6 +18,7 @@ from .files import kind_of
 from .music import fmt_t
 
 MODES = ['blend', 'pixel', 'grey', 'ascii', 'mono']
+DITHERS = imaging.DITHERS           # bayer4, bayer8, fs, none (d in the window)
 # how far the picture may fall behind the sound before it is restarted (seconds)
 LAG_LIMIT = float(os.environ.get('MONOCELL_GFX_LAG', '3'))
 DEBUG = bool(os.environ.get('MONOCELL_GFX_DEBUG'))   # per-second numbers in the log
@@ -81,6 +82,10 @@ class Video(App):
     @property
     def mode(self):
         return self.wm.cfg.get('video_mode', 'pixel')
+
+    @property
+    def dither(self):
+        return self.wm.cfg.get('dither', 'bayer4')
 
     def proc_info(self):
         return '%dx%d @%dfps' % (self.dims[0], self.dims[1], self.fps) if self.dec else ''
@@ -713,7 +718,8 @@ class Video(App):
         x = 1
         y += 1
         for label, key in (('>' if self.paused or not self.info else '||', 'play'), ('<<', 'rew'), ('>>', 'ffw'),
-                           ('Open', 'open'), (self.mode, 'mode'), ('Full', 'full'), ('Gfx', 'gfx')):
+                           ('Open', 'open'), (self.mode, 'mode'), (self.dither, 'dither'),
+                           ('Full', 'full'), ('Gfx', 'gfx')):
             x += button(self, cv, x, y, label, key, primary=key == 'play') + 1
         st = '%dx%d cells  %dfps  %.0fms/frame' % (self.dims[0], self.dims[1], self.fps, self.stats[1])
         if x + len(st) + 2 < w:
@@ -754,6 +760,11 @@ class Video(App):
         elif key == 'mode':
             cur = self.mode if self.mode in MODES else MODES[0]
             self.wm.cfg['video_mode'] = MODES[(MODES.index(cur) + 1) % len(MODES)]
+            self.wm.cfg.save()
+            self.wm.settings_changed()
+        elif key == 'dither':
+            cur = self.dither if self.dither in DITHERS else DITHERS[0]
+            self.wm.cfg['dither'] = DITHERS[(DITHERS.index(cur) + 1) % len(DITHERS)]
             self.wm.cfg.save()
             self.wm.settings_changed()
         elif key == 'full':
@@ -857,6 +868,8 @@ class Video(App):
             self.seek(self.media_time() - 60)
         elif k == 'm':
             self.on_click('mode', None)
+        elif k == 'd':
+            self.on_click('dither', None)
         elif k in ('f', 'enter'):
             self.set_fullscreen(self.chrome)
         elif k == 'esc' and not self.chrome:

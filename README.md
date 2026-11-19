@@ -281,6 +281,11 @@ monocell-clip --clear
   `ascii`, `mono`; Zoom, Pan, Blättern (auch per Pfeiltasten), Vollbild. **Vollbild** (`f`
   oder `Full`) zeigt das Bild randlos in der **größten Textauflösung** (eine Zelle pro
   Bildpixel, gewählter Modus, 16 Farben); `Esc` oder `F` kehrt zurück.
+  **Dithering** (`d` oder der Knopf mit dem Modusnamen): `bayer4`, `bayer8`, `fs`
+  (Fehlerdiffusion bei `pixel`, in ASCII die 4×4-Matrix) und `none`. In **`ascii`** gibt
+  es keinen Hintergrund, also mischt der Dither die **zwei nächsten Palettenfarben von
+  Zelle zu Zelle** – ein Himmel zwischen Blau und Petrol bekommt abwechselnd beide
+  Töne statt einer harten Kante; die Helligkeit trägt weiter das Zeichen.
   **Grafikmodus** (`g` oder `Gfx`, nur auf der Linux-Konsole): dasselbe Bild als echte
   Pixel im Framebuffer, durch dieselbe Kette wie der Videoplayer, mit denselben Looks
   (`c`), Dithering (`d`) und Scanlines (`s`). Für `VGA 256` wird eine Palette aus dem
@@ -296,6 +301,10 @@ monocell-clip --clear
   **Playlist:** Filme, die man auf den Player zieht, landen in einer Liste; `l` zeigt und
   verbirgt die Spalte, `n`/`b` springen zum nächsten/vorigen Film, und am Ende eines
   Films läuft der nächste von selbst weiter. Ohne laufenden Film startet ein Drop sofort.
+  **Darstellung:** `m` (oder der Knopf mit dem Modusnamen) schaltet `blend`, `pixel`,
+  `grey`, `ascii`, `mono` durch, `d` denselben Dither wie im Bildbetrachter (`bayer4`,
+  `bayer8`, `fs`, `none`) – im Fenster wie im Vollbild, und `ascii` mischt seine Farbe
+  damit zwischen den zwei nächsten Palettenfarben, statt in Streifen zu springen.
   **Grafikmodus** (`g` oder `Gfx`, nur auf der Linux-Konsole): wie ein DOS-Spiel verlässt
   monocell den Textmodus – die Konsole wird per `KDSETMODE` auf `KD_GRAPHICS` gestellt und
   das Video landet direkt im Framebuffer (`/dev/fb0`), als harte Pixel in einem Viertel

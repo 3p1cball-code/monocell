@@ -6,8 +6,12 @@ Render modes (per cell):
   blend : bg colour + fg colour + a density character from ' .:+*%#@' -> mixes two palette
           colours; best tonal reconstruction with ASCII only
   pixel : one dithered "pixel" per cell drawn as a coloured space (8-bit look)
-  ascii : classic ASCII art, brightness -> glyph, nearest hue as fg
+  ascii : classic ASCII art, brightness -> glyph; the colour is mixed from the two
+          nearest palette entries from cell to cell (ordered dither, `d`)
   mono  : ASCII art in the accent colour
+
+Dithering (`dither`): bayer4, bayer8 (ordered), fs (error diffusion where the mode
+supports it, the 4x4 matrix in ASCII) or none.
 """
 import io
 import struct
@@ -15,6 +19,8 @@ import subprocess
 import zlib
 
 from .util import which
+
+DITHERS = ['bayer4', 'bayer8', 'fs', 'none']
 
 try:
     from PIL import Image as PILImage  # optional
@@ -27,6 +33,7 @@ BAYER8 = [[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26], [12, 
           [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]]
 DENSITY = [(' ', 0.0), ('.', 0.10), (':', 0.18), ('+', 0.28), ('*', 0.36), ('%', 0.45), ('#', 0.52), ('@', 0.60)]
 TEXTURE = 0.35
+PAIR_TEXTURE = 1.0         # how much ASCII avoids mixing two far-apart colours
 ASCII_RAMP = " .,:;-~=+*o%#&@"
 # classic density ordering of printable ASCII (every glyph used)
 ASCII_FULL = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
@@ -367,6 +374,7 @@ class Renderer:
         self.near = {}
         self.near_bg = {}
         self.blend = {}
+        self.pair = {}
         self.pairs = []
         self.key = (tuple(rgb), tuple(allowed_bg), accent, dark)
 
@@ -474,6 +482,62 @@ class Renderer:
             self.bchr[q] = ord(ch)
         return self.blut, self.bchr
 
+    # ---------------------------------------------------------- colour pairs
+    def colour_pair(self, q):
+        """(first, second, share) for a colour, q = (r>>4, g>>4, b>>4).
+
+        The two palette entries that bracket this colour and how much of the
+        second one it needs. ASCII art can mix them only from cell to cell (a
+        glyph has one colour, the background stays the window's), so the dither
+        picks one of the two per cell."""
+        v = self.pair.get(q)
+        if v is not None:
+            return v
+        r, g, b = (q[0] << 4) + 8, (q[1] << 4) + 8, (q[2] << 4) + 8
+        rgb = self.rgb
+        dist = sorted(range(16), key=lambda i: (r - rgb[i][0]) ** 2 * 3 +
+                      (g - rgb[i][1]) ** 2 * 4 + (b - rgb[i][2]) ** 2 * 2)
+        allowed = self.allowed_bg
+        cand = ([i for i in dist if not self.strict or i in allowed]
+                if self.strict else dist)[:6]
+        best, bd = (cand[0], cand[0], 0.0), 1 << 40
+        for ai in range(len(cand)):
+            i = cand[ai]
+            Pi = rgb[i]
+            for bi in range(ai, len(cand)):
+                j = cand[bi]
+                Pj = rgb[j]
+                dx, dy, dz = Pj[0] - Pi[0], Pj[1] - Pi[1], Pj[2] - Pi[2]
+                dd = dx * dx * 3 + dy * dy * 4 + dz * dz * 2
+                t = 0.0 if not dd else (((r - Pi[0]) * dx * 3 + (g - Pi[1]) * dy * 4
+                                         + (b - Pi[2]) * dz * 2) / dd)
+                t = 0.0 if t < 0 else (1.0 if t > 1 else t)
+                mr, mg, mb = Pi[0] + dx * t, Pi[1] + dy * t, Pi[2] + dz * t
+                err = (r - mr) ** 2 * 3 + (g - mg) ** 2 * 4 + (b - mb) ** 2 * 2
+                # a pattern of two far-apart colours reads as speckle, not as the
+                # colour in between (blend_cell pays the same price)
+                err += TEXTURE * PAIR_TEXTURE * t * (1 - t) * dd
+                if err < bd:
+                    bd, best = err, (i, j, t)
+        self.pair[q] = best
+        return best
+
+    def pair_lut(self, np, keys):
+        """(first, second int32[4096], share float64[4096]) for the 12-bit keys in
+        use - colour_pair() filled lazily, like blend_lut()."""
+        if getattr(self, 'plut', None) is None:
+            self.plut = np.full(4096, -1, dtype=np.int32)
+            self.plut_b = np.zeros(4096, dtype=np.int32)
+            self.plut_t = np.zeros(4096, dtype=np.float64)
+        need = np.unique(keys)
+        need = need[self.plut[need] < 0]
+        for q in need.tolist():
+            a, b, t = self.colour_pair((q >> 8, (q >> 4) & 15, q & 15))
+            self.plut[q] = a
+            self.plut_b[q] = b
+            self.plut_t[q] = t
+        return self.plut, self.plut_b, self.plut_t
+
 
 # ------------------------------------------------------------------ numpy fast paths
 # The per-cell loops below cost ~40 ms per frame for 204x109 cells on a Core 2 Duo
@@ -521,9 +585,32 @@ def _offsets_np(np, dither, w, h, spread):
     return np.tile(m, ((h + n - 1) // n, (w + n - 1) // n))[:h, :w]
 
 
-def _render_ascii_np(np, R, rgb, w, h, mode, th, ramp):
+def _ascii_thresholds(dither):
+    """(matrix of thresholds in [0,1), n) for the ASCII colour.
+
+    ASCII art shows the glyph, never the cell background, so a colour between two
+    palette entries can only be mixed *across cells*: this fraction of the cells
+    gets the second entry. The ordered matrix decides which ones - the same idea
+    as the palette dither in the graphics mode, one decision per cell.
+    'fs' has no error diffusion here; its intent is a smooth picture, so it gets
+    the 4x4 matrix. 'none' keeps the nearer entry everywhere (threshold 1/2)."""
+    if dither in (None, 'none'):
+        return [[0.5]], 1
+    if dither == 'fs':
+        dither = 'bayer4'
+    mat, n = _bayer(dither)                    # entries in [-0.5, 0.5)
+    return [[v + 0.5 for v in row] for row in mat], n
+
+
+def _thresholds_np(np, dither, w, h):
+    mat, n = _ascii_thresholds(dither)
+    m = np.array(mat, dtype=np.float64)
+    return np.tile(m, ((h + n - 1) // n, (w + n - 1) // n))[:h, :w]
+
+
+def _render_ascii_np(np, R, rgb, w, h, mode, th, ramp, dither='bayer4'):
     r, g, b = _planes_np(np, rgb, w, h)
-    lum = (r * 299 + g * 587 + b * 114) // 1000
+    lum = (r * 299 + g * 587 + b * 114) // 1000          # the glyph: undithered
     nr = len(ramp) - 1
     codes = np.array([ord(c) for c in ramp], dtype=np.int32)[lum * nr // 255]
     bg = th.r['shadow']
@@ -531,9 +618,11 @@ def _render_ascii_np(np, R, rgb, w, h, mode, th, ramp):
         fg = np.full((h, w), th.r['accent'], dtype=np.int32)
     else:
         m = np.maximum(np.maximum(np.maximum(r, g), b), 1)
-        lut = R.nearest_lut(np, R.allowed_bg if R.strict else None)
-        k = (((r * 255 // m) >> 2) << 12) | (((g * 255 // m) >> 2) << 6) | ((b * 255 // m) >> 2)
-        fg = lut[k].astype(np.int32)
+        q = ((((r * 255 // m) >> 4) << 8) | (((g * 255 // m) >> 4) << 4)
+             | ((b * 255 // m) >> 4))
+        first, second, share = R.pair_lut(np, q)
+        fg = np.where(share[q] > _thresholds_np(np, dither, w, h),
+                      second[q], first[q]).astype(np.int32)
     return _rows_np(np, codes, fg | (bg << 4), w, h)
 
 
@@ -659,8 +748,9 @@ def render(wm, rgb, w, h, mode=None, dither=None, dim=1.0, grey=False):
     if mode in ('ascii', 'mono'):
         charset = wm.cfg.get('ascii_charset', 'full')
         if np is not None:
-            return _render_ascii_np(np, R, rgb, w, h, mode, wm.theme, _ramp(charset))
-        return _render_ascii(R, rgb, w, h, mode, wm.theme, charset)
+            return _render_ascii_np(np, R, rgb, w, h, mode, wm.theme, _ramp(charset),
+                                    dither)
+        return _render_ascii(R, rgb, w, h, mode, wm.theme, charset, dither)
     if np is not None:                   # blend has no error diffusion: fs = none
         return _render_blend_np(np, R, rgb, w, h, dither)
     return _render_blend(R, rgb, w, h, dither)
@@ -785,14 +875,17 @@ def _render_pixel(R, rgb, w, h, dither):
     return rows
 
 
-def _render_ascii(R, rgb, w, h, mode, th, charset='full'):
+def _render_ascii(R, rgb, w, h, mode, th, charset='full', dither='bayer4'):
     bg = th.r['shadow']
     ramp = _ramp(charset)
     nr = len(ramp) - 1
+    mat, n = _ascii_thresholds(dither)
     rows = []
     o = 0
     acc = th.r['accent']
+    pair = R.colour_pair
     for y in range(h):
+        mrow = mat[y % n]
         cs = []
         ats = []
         for x in range(w):
@@ -804,8 +897,10 @@ def _render_ascii(R, rgb, w, h, mode, th, charset='full'):
                 fg = acc
             else:
                 m = max(r, g, b, 1)
-                fg = R.nearest(r * 255 // m, g * 255 // m, b * 255 // m,
-                               R.allowed_bg if R.strict else None)
+                first, second, share = pair(((r * 255 // m) >> 4,
+                                             (g * 255 // m) >> 4,
+                                             (b * 255 // m) >> 4))
+                fg = second if share > mrow[x % n] else first
             ats.append(fg | (bg << 4))
         rows.append((''.join(cs), ats))
     return rows
