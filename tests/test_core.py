@@ -1,4 +1,5 @@
 """Core tests: text sanitation, formulas, VT emulation, input decoding, canvas, imaging."""
+import base64
 import json
 import os
 import shutil
@@ -252,6 +253,39 @@ class TestVT(unittest.TestCase):
         v = VTScreen(4, 2)
         v.feed('\x1b]4;1;rgb:ff/00/11\x1b\\')
         self.assertEqual(v.palette[1], (255, 0, 17))
+
+    def test_osc52_sets_clipboard(self):
+        got = []
+        v = VTScreen(4, 2, on_clipboard=got.append)
+        payload = base64.b64encode('hallo Welt'.encode()).decode()
+        v.feed('\x1b]52;c;%s\x07' % payload)
+        self.assertEqual(got, ['hallo Welt'])
+
+    def test_osc52_long_text_and_st_terminator(self):
+        got = []
+        v = VTScreen(4, 2, on_clipboard=got.append)
+        text = 'zeile\n' * 20000                  # ~120 KB, far beyond the old 4 KB cap
+        v.feed('\x1b]52;c;%s\x1b\\' % base64.b64encode(text.encode()).decode())
+        self.assertEqual(got, [text])
+
+    def test_osc52_ignores_queries_and_garbage(self):
+        got = []
+        v = VTScreen(4, 2, on_clipboard=got.append)
+        v.feed('\x1b]52;c;?\x07')                 # read request: never answered
+        v.feed('\x1b]52;c;not base64!!\x07')
+        v.feed('\x1b]52;;\x07')
+        v.feed('\x1b]52;c;%s\x07' % base64.b64encode(b'\x00bin').decode())
+        self.assertEqual(got, [])
+
+    def test_osc52_without_handler_is_harmless(self):
+        v = VTScreen(4, 2)
+        v.feed('\x1b]52;c;%s\x07' % base64.b64encode(b'x').decode())
+        self.assertEqual(''.join(v.lines[0][0]), '    ')
+
+    def test_dcs_stays_small(self):
+        v = VTScreen(4, 2)
+        v.feed('\x1bP' + 'x' * 10000 + '\x1b\\ok')
+        self.assertEqual(''.join(v.lines[0][0]), 'ok  ')
 
     def test_linux_palette(self):
         v = VTScreen(4, 2)

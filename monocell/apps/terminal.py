@@ -25,7 +25,8 @@ class Terminal(App):
     def __init__(self, wm, win, cmd=None, cwd=None, title=None, close_on_exit=True, env=None, **kw):
         super().__init__(wm, win)
         cols, rows = max(10, win.cw), max(3, win.ch)
-        self.vt = VTScreen(cols, rows, scrollback=3000, reply=self.write)
+        self.vt = VTScreen(cols, rows, scrollback=3000, reply=self.write,
+                           on_clipboard=self.osc52_copy)
         self.scroll = 0
         self.sel = None           # ((line, col), (line, col)) in absolute coords
         self.selecting = False
@@ -237,6 +238,14 @@ class Terminal(App):
 
     def selection_text(self):
         return self.selected_text() if self.sel else ''
+
+    def osc52_copy(self, text):
+        """A program inside the terminal (opencode, vim, tmux …) copied via OSC 52."""
+        self.wm.set_clipboard(text)
+        n = len(text)
+        where = self.win.title or 'the terminal'
+        self.wm.toast('Copied %d character%s from %s' % (n, '' if n == 1 else 's', where))
+        self.invalidate()
 
     def on_key(self, ev):
         if self.exited is not None:

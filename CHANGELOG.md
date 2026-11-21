@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Programs in a terminal can copy again (OSC 52).** Modern TUI programs -
+  opencode, vim, tmux, anything on a current toolkit - put a copy on the wire as
+  `ESC ] 52 ; <selection> ; <base64>`, and the parser dropped that sequence on the
+  floor: the app said "Copied to clipboard", Monocell's clipboard stayed empty. The
+  VT now decodes it (BEL and `ESC \` terminators, base64 with or without padding,
+  up to a megabyte) and hands the text to `wm.set_clipboard`: it lands in
+  `~/.cache/monocell/clipboard`, in `monocell-clip`, in KDE Connect's *send
+  clipboard* and - when Monocell runs inside a real terminal - in the surrounding
+  terminal's clipboard, as before. A toast names the window the text came from.
+  Read requests (`?`) are still not answered, child apps do not get the clipboard
+  back. Strings that run past their limit (a DCS/APC flood) are now swallowed up to
+  their terminator instead of spilling onto the screen as text. Five new tests in
+  `tests/test_core.py`.
+
 - **The ASCII look dithers its colours.** `ascii` art put one palette colour on
   every cell - the nearest hue - so a sky or a skin tone jumped between two entries
   in hard bands. Now the two palette entries that bracket a colour are mixed from

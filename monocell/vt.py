@@ -3,6 +3,8 @@
 Used by the Terminal app and by the screenshot test harness.
 Output stays strictly cell-aligned: wide/box/line-drawing glyphs are mapped to ASCII.
 """
+import base64
+import binascii
 import re
 import unicodedata
 
@@ -11,6 +13,8 @@ from .util import char_ascii
 DEF = 16                      # 'default colour' marker
 F_BOLD, F_UL, F_REV, F_DIM, F_INV = 1, 2, 4, 8, 16
 DEFAULT_ATTR = DEF | (DEF << 5)
+OSC_LIMIT = 1 << 20           # an OSC may carry a whole clipboard (OSC 52)
+STR_LIMIT = 4096              # DCS/APC/PM payloads only get swallowed, keep them small
 
 DEC_GFX = {'j': '+', 'k': '+', 'l': '+', 'm': '+', 'n': '+', 'q': '-', 't': '+', 'u': '+',
            'v': '+', 'w': '+', 'x': '|', '`': '*', 'a': ':', 'f': 'o', 'g': '#', '~': '*',
@@ -37,10 +41,11 @@ def glyph(c):
 
 
 class VTScreen:
-    def __init__(self, cols=80, rows=24, scrollback=2000, reply=None):
+    def __init__(self, cols=80, rows=24, scrollback=2000, reply=None, on_clipboard=None):
         self.cols, self.rows = max(1, cols), max(1, rows)
         self.max_history = scrollback
         self.reply = reply or (lambda s: None)
+        self.on_clipboard = on_clipboard      # OSC 52: app -> terminal clipboard
         self.history = []          # list of (chars list, attrs list)
         self.palette = {}          # OSC 4 changes (used by test harness)
         self.rgb_palette = None    # optional 16 RGB tuples to map truecolor back
@@ -70,6 +75,7 @@ class VTScreen:
         self.saved = (0, 0, DEFAULT_ATTR, ['B', 'B'], 0)
         self.state = 0             # 0 ground, 1 esc, 2 csi, 3 osc, 4 charset, 5 esc-intermediate
         self.seq = ''
+        self.seq_limit = OSC_LIMIT
         self.charset_slot = 0
         self.tabs = set(range(8, 1000, 8))
         self.dirty = True
@@ -236,6 +242,7 @@ class VTScreen:
             elif c == ']':
                 self.state = 3
                 self.seq = ''
+                self.seq_limit = OSC_LIMIT
             elif c in '()*+':
                 self.state = 4
                 self.charset_slot = 0 if c == '(' else 1
@@ -244,6 +251,7 @@ class VTScreen:
             elif c == 'P' or c == '_' or c == '^':
                 self.state = 3        # DCS/APC/PM: swallow until ST like OSC
                 self.seq = '\x00'
+                self.seq_limit = STR_LIMIT
             else:
                 self.state = 0
                 self._esc(c)
@@ -271,8 +279,9 @@ class VTScreen:
                 self.state = 6
             else:
                 self.seq += c
-                if len(self.seq) > 4096:
-                    self.state = 0
+                if len(self.seq) > self.seq_limit:
+                    self.state = 8        # over-long string: swallow until BEL/ST
+                    self.seq = ''
         elif st == 6:    # ESC inside OSC -> expect '\'
             self.state = 0
             self._osc(self.seq)
@@ -290,6 +299,15 @@ class VTScreen:
         elif st == 4:
             self.g[self.charset_slot] = c
             self.state = 0
+        elif st == 8:    # string too long: discard until BEL or ST
+            if c == '\x07':
+                self.state = 0
+            elif c == '\x1b':
+                self.state = 9
+        elif st == 9:    # ESC inside the discarded string -> expect '\'
+            self.state = 0
+            if c != '\\':
+                self._escape_char_ground(c)
         elif st == 5:
             self.state = 0
 
@@ -342,6 +360,34 @@ class VTScreen:
                     pass
         elif num == '104':
             self.palette = {}
+        elif num == '52':
+            self._osc52(rest)
+
+    def _osc52(self, rest):
+        """OSC 52: an application puts text into the terminal's clipboard.
+
+        Format: ``52;<selection>;<base64>``.  A ``?`` instead of the base64 is a
+        read request; monocell does not hand the clipboard back to child apps.
+        """
+        if self.on_clipboard is None:
+            return
+        sel, sep, payload = rest.partition(';')
+        if not sep:                       # no selection given: treat it all as data
+            payload = rest
+        payload = ''.join(payload.split())
+        if not payload or payload in ('?', '!'):
+            return
+        payload += '=' * (-len(payload) % 4)
+        try:
+            raw = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError):
+            return
+        try:
+            text = raw.decode('utf-8')
+        except UnicodeDecodeError:
+            return
+        if text and '\x00' not in text:
+            self.on_clipboard(text)
 
     def _params(self, seq, default=0):
         out = []
