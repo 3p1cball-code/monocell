@@ -11,10 +11,12 @@ Document model:  {'title', 'url', 'blocks': [...]}
 import base64
 import gzip
 import html
+import ipaddress
 import json
 import os
 import re
 import socket
+import ssl
 import struct
 import subprocess
 import threading
@@ -31,30 +33,83 @@ UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 
 
 # ======================================================================= fetching
-def fetch(url, data=None, timeout=20, max_bytes=8_000_000, headers=None):
-    """Returns (final_url, content_type, bytes)."""
+SCHEMES = ('http://', 'https://', 'file://')
+
+LOCAL_SUFFIXES = ('.local', '.lan', '.home', '.internal', '.fritz.box', '.speedport.ip')
+
+
+def looks_local(addr):
+    """True for an address that is a machine here or in the LAN - one to try with
+    plain HTTP first. Typing '192.168.33.24:6870' used to become
+    'https://192.168.33.24:6870' and the server answered the TLS hello with plain
+    HTTP: 'SSL: WRONG_VERSION_NUMBER', which looked like the page was not there."""
+    host = addr.split('/')[0]
+    if host.startswith('['):
+        return True                      # [::1]:8000 and friends
+    if host.count(':') == 1:
+        host = host.split(':')[0]
+    try:
+        return ipaddress.ip_address(host).is_private or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        pass
+    host = host.lower()
+    return host == 'localhost' or '.' not in host or host.endswith(LOCAL_SUFFIXES)
+
+
+def http_hint(url, err):
+    """The plain-HTTP address of url when an https request was answered without TLS
+    (a local service on a non-standard port, a captive portal). '' when it does not
+    apply."""
+    text = str(err)
+    if not any(k in text for k in ('SSL', 'TLS', 'WRONG_VERSION_NUMBER', 'UNKNOWN_PROTOCOL')):
+        return ''
+    p = urllib.parse.urlsplit(url)
+    if p.scheme != 'https' or (p.port or 443) == 443:
+        return ''
+    return urllib.parse.urlunsplit(('http', p.netloc, p.path or '/', p.query, ''))
+
+
+
+def fetch(url, data=None, timeout=20, max_bytes=8_000_000, headers=None, tries=2):
+    """Returns (final_url, content_type, bytes).
+
+    Errors that come back immediately (name resolution, an intercepted HTTPS
+    connection behind a captive portal, a reset socket) are tried a second time:
+    right after a reconnect - exactly when the network is still settling - the
+    first lookup fails and the second one already works. A real timeout is not
+    repeated, it would only double the wait."""
     if url.startswith('file://'):
         path = urllib.parse.unquote(url[7:])
         with open(path, 'rb') as f:
             body = f.read(max_bytes)
         ct = 'text/html' if path.lower().endswith(('.html', '.htm', '.xhtml')) else 'text/plain'
         return url, ct, body
+    if not url.startswith(SCHEMES):
+        raise ValueError('not a web address: %s' % url)
     h = {'User-Agent': UA, 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
          'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8', 'Accept-Encoding': 'gzip, deflate'}
     if headers:
         h.update(headers)
     req = urllib.request.Request(url, data=data, headers=h)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        body = r.read(max_bytes)
-        enc = r.headers.get('Content-Encoding', '')
-        if enc == 'gzip':
-            body = gzip.decompress(body)
-        elif enc == 'deflate':
-            try:
-                body = zlib.decompress(body)
-            except zlib.error:
-                body = zlib.decompress(body, -15)
-        return r.geturl(), r.headers.get('Content-Type', ''), body
+    for attempt in range(max(1, tries)):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                body = r.read(max_bytes)
+                enc = r.headers.get('Content-Encoding', '')
+                if enc == 'gzip':
+                    body = gzip.decompress(body)
+                elif enc == 'deflate':
+                    try:
+                        body = zlib.decompress(body)
+                    except zlib.error:
+                        body = zlib.decompress(body, -15)
+                return r.geturl(), r.headers.get('Content-Type', ''), body
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, ssl.SSLError, OSError) as e:
+            if attempt + 1 >= max(1, tries) or 'timed out' in str(e):
+                raise
+            time.sleep(0.5)
 
 
 def decode_html(body, ctype):

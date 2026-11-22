@@ -372,7 +372,10 @@ class Browser(App):
         if os.path.exists(os.path.expanduser(t)):
             return 'file://' + urllib.parse.quote(os.path.abspath(os.path.expanduser(t)))
         if re.match(r'^[\w-]+(\.[\w-]+)+(:\d+)?(/.*)?$', t) and ' ' not in t:
-            return 'https://' + t
+            # a service on this machine or in the LAN (192.168.33.24:6870,
+            # localhost:8000, x61s.fritz.box) speaks plain HTTP far more often
+            # than not - https only goes to the internet
+            return ('http://' if web.looks_local(t) else 'https://') + t
         return self.cfg.get('search_url', 'https://html.duckduckgo.com/html/?q=%s') % urllib.parse.quote_plus(t)
 
     def go_text(self, t):
@@ -395,6 +398,18 @@ class Browser(App):
         if url == HOME_URL:
             self.show(self.home_doc())
             return
+        if not url.startswith(('http://', 'https://', 'file://')):
+            # not a page we can fetch (Chromium's chrome-error:// after a failed
+            # navigation, a devtools or mail address ...). Keep the address that
+            # was asked for, so a reload retries the real page instead of failing
+            # on an internal URL for ever.
+            self.loading = False
+            self.status = ''
+            self.show({'title': 'Error', 'url': self.url, 'blocks': [
+                {'t': 'h', 'l': 1, 's': [{'x': 'Could not load the page'}]},
+                {'t': 'p', 's': [{'x': 'not a web address: %s' % url}]},
+                {'t': 'p', 's': [{'x': 'R / Ctrl+R tries the address above again.'}]}]})
+            return
         target = url
 
         def work():
@@ -410,9 +425,15 @@ class Browser(App):
                 return
             self.loading = False
             self.status = ''
-            self.show({'title': 'Error', 'url': url, 'blocks': [
-                {'t': 'h', 'l': 1, 's': [{'x': 'Could not load the page'}]},
-                {'t': 'p', 's': [{'x': str(e)}]}, {'t': 'p', 's': [{'x': url, 'h': url}]}]})
+            blocks = [{'t': 'h', 'l': 1, 's': [{'x': 'Could not load the page'}]},
+                      {'t': 'p', 's': [{'x': str(e)}]},
+                      {'t': 'p', 's': [{'x': url, 'h': url}]}]
+            alt = web.http_hint(url, e)
+            if alt:
+                blocks += [{'t': 'h', 'l': 2, 's': [{'x': 'This server does not speak TLS'}]},
+                           {'t': 'p', 's': [{'x': alt, 'h': alt}]},
+                           {'t': 'p', 's': [{'x': 'Enter opens the plain HTTP address.'}]}]
+            self.show({'title': 'Error', 'url': url, 'blocks': blocks})
         self.thread(work, done, fail)
 
     def show(self, doc):
@@ -716,7 +737,7 @@ class Browser(App):
             return
         url = g.url
         g.stop()
-        if url and url != 'about:blank' and url != self.url:
+        if url and url != 'about:blank' and url != self.url and not url.startswith('chrome-error'):
             self.navigate(url)               # the text view follows the graphics mode
         self.invalidate()
 

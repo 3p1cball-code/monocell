@@ -400,11 +400,21 @@ class WebGfx:
             self.refresh_hud()
 
     def on_url(self, url):
-        if url:
-            self.url = url
-            self.editing = False
-            self.hover = ''
+        if not url:
+            return
+        if url.startswith(('chrome-error://', 'chrome-untrusted://', 'devtools://')):
+            # Chromium's own error page ("this site can't be reached"). Taking its
+            # URL would poison the address bar: the text view cannot fetch a
+            # chrome-error address, so every later reload failed with "unknown url
+            # type" instead of retrying the page that was asked for.
+            self.status = 'Page not reachable - Ctrl+G for the text view, Ctrl+R to retry'
+            self.later_check(6.0)
             self.refresh_hud()
+            return
+        self.url = url
+        self.editing = False
+        self.hover = ''
+        self.refresh_hud()
 
     def on_loading(self, on):
         self.loading = on
