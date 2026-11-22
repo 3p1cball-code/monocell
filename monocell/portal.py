@@ -131,6 +131,65 @@ def verdict(res, status, body, url):
     return 'online', '', 'ok'
 
 
+LOGIN_WORDS = ('login', 'log in', 'log-in', 'sign in', 'sign-in', 'anmeld', 'willkommen',
+               'welcome', 'hotspot', 'portal', 'passwort', 'password', 'nutzungsbeding',
+               'terms of', 'agb', 'gastzugang', 'internetzugang')
+
+
+def login_page(body):
+    """Does an answer read like a login page? (a router's admin page does not)"""
+    low = (body or b'').lower()
+    if not low:
+        return False
+    return any(w.encode() in low for w in LOGIN_WORDS)
+
+
+def resolvers():
+    """The DNS servers this machine was told about (/etc/resolv.conf)."""
+    out = []
+    try:
+        with open('/etc/resolv.conf') as f:
+            for line in f:
+                p = line.split()
+                if len(p) >= 2 and p[0] == 'nameserver' and not p[1].startswith(('127.', '::1')):
+                    out.append(p[1])
+    except OSError:
+        pass
+    return out
+
+
+def dhcp_hint():
+    """A portal address the DHCP server named (RFC 8910, as far as nmcli shows it)."""
+    rc, out = nmcli(['-f', 'DHCP4', 'device', 'show'])
+    if rc != 0:
+        return []
+    found = []
+    for line in (out or '').splitlines():
+        low = line.lower()
+        if 'http://' not in low and 'https://' not in low:
+            continue
+        url = 'http' + line.split('http', 1)[1].strip().split()[0]
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname or ''
+        if host and not host.replace('.', '').isdigit():
+            continue                    # needs a name, and names do not resolve here
+        if parts.port and parts.port != 80:
+            host = '%s:%d' % (host, parts.port)
+        if host and host not in found:
+            found.append(host)
+    return found
+
+
+def local_candidates(gateway=None, dns=None, extra=None):
+    """Addresses a portal can hide behind when no name resolves, in the order to try."""
+    out = []
+    for host in ([gateway] if gateway else []) + list(dns or []) + list(extra or []):
+        host = (host or '').strip()
+        if host and host not in out:
+            out.append(host)
+    return out
+
+
 def check(timeout=4.0, gateway=None, probes=PROBES, request=_request):
     """Is this network open, behind a login page, or simply not there?
 
@@ -160,24 +219,31 @@ def check(timeout=4.0, gateway=None, probes=PROBES, request=_request):
         detail = why if len(found) > 1 else '%s (not confirmed)' % why
         return result('portal', url, detail, probes[0][0])
 
-    # Nothing answered. A portal can still be sitting on the gateway: some hotel
-    # and train systems hand out no DNS at all until the login is done. A redirect
-    # or a 511 there is proof; a plain admin page is not, and stays "offline".
-    if gw:
-        gw_url = 'http://%s/' % gw
-        res = request(gw_url, min(3.0, timeout))
+    # Nothing answered. Some hotel, train and airport systems hand out no DNS at
+    # all until the login is done, so the portal is only reachable by address: the
+    # gateway, the DNS server (often the portal itself) or whatever the DHCP server
+    # named. A redirect or a 511 there is proof; an ordinary page counts only when it
+    # reads like a login, so a router's admin page does not open by itself.
+    answers = ''
+    for host in local_candidates(gw, resolvers(), dhcp_hint()):
+        url = 'http://%s/' % host
+        res = request(url, min(3.0, timeout))
         code = res.get('status') or 0
         if code in REDIRECTS or code == 511:
-            target = urllib.parse.urljoin(gw_url, res.get('location') or '') or gw_url
-            return result('portal', target, 'gateway asks for a login' if code == 511 else
-                          'gateway redirects', gw_url)
+            target = urllib.parse.urljoin(url, res.get('location') or '') or url
+            if urllib.parse.urlsplit(target).hostname in (None, ''):
+                target = url
+            return result('portal', target, '%s asks for a login' % host, url)
+        if code == 200 and login_page(res.get('body')):
+            return result('portal', url, 'login page on %s' % host, url)
         if code:
-            return result('offline', gw_url, '%s - the gateway answers' %
-                          REASONS.get(fails[0] if fails else '', fails[0] if fails else 'offline'),
-                          gw_url)
+            answers = answers or url
     why = REASONS.get(fails[0], fails[0]) if fails else 'offline'
     if len(set(fails)) > 1:
         why = ', '.join(REASONS.get(f, f) for f in dict.fromkeys(fails))
+    if answers:
+        return result('offline', answers, '%s - %s answers' % (why, answers.split('//')[1].strip('/')),
+                      answers)
     return result('offline', '', why, probes[0][0])
 
 

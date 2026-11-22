@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A portal that hands out no DNS is still found.** Hotel, train and airport
+  systems sometimes give you an address and nothing else until the login is done:
+  then every probe ends in "no name resolution" and the login page is only reachable
+  by address. After the gateway, `portal.check()` now also tries the DNS servers
+  (`/etc/resolv.conf` - the portal often *is* the DNS server) and whatever the DHCP
+  server named (RFC 8910 option 114, as far as `nmcli` shows it). A redirect or a 511
+  there is proof; an ordinary page counts only when it reads like a login
+  ("anmelden", "sign in", "hotspot", "Nutzungsbedingungen" ...), so a router's admin
+  page never opens by itself - it is only offered as the address to try.
+
 - **Wifi on the console: one click connects, and the refusal has a reason.** The
   network list only connected on a double click or Enter - a single click just moved
   the selection, so a click on a network looked like nothing happened. `ListView` grew

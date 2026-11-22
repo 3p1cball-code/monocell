@@ -175,7 +175,8 @@ class TestCheck(unittest.TestCase):
         res = portal.check(probes=portal.PROBES, request=dead,
                            gateway='127.0.0.1:%d' % s.port)
         self.assertEqual(res['state'], 'offline')
-        self.assertIn('gateway answers', res['detail'])
+        self.assertIn('answers', res['detail'])
+        self.assertIn('no name resolution', res['detail'])
         self.assertTrue(res['url'].startswith('http://127.0.0.1:'))
 
 
@@ -191,6 +192,59 @@ class TestNetworkButton(unittest.TestCase):
         # ' Anmeldeseite ' plus the gap behind it: 15 cells from x
         self.assertEqual(portal_button_label(33, 33 + 15), 'Anmeldeseite')
         self.assertEqual(portal_button_label(33, 33 + 14), 'Anmeldung')
+
+
+class TestWithoutDns(unittest.TestCase):
+    """Hotel and train systems hand out no DNS until the login: only addresses work."""
+
+    def setUp(self):
+        self.servers = []
+
+    def tearDown(self):
+        for s in self.servers:
+            s.close()
+
+    def serve(self, routes):
+        s = Server(routes)
+        self.servers.append(s)
+        return s
+
+    def dead(self, url, timeout=4.0, max_bytes=2048):
+        if url.startswith('http://127.0.0.1'):          # the address still answers
+            return portal._request(url, timeout)
+        return {'status': 0, 'url': url, 'location': '', 'ctype': '', 'body': b'',
+                'error': 'dns'}
+
+    def test_a_login_page_on_the_dns_server_is_found(self):
+        s = self.serve({'/': (200, {'Content-Type': 'text/html'},
+                              b'<html><h1>Willkommen im Zug-WLAN</h1>'
+                              b'<p>Bitte melden Sie sich an.</p></html>')})
+        # no gateway this time: the DNS server is the only address left to try
+        bare = portal.check(probes=portal.PROBES, request=self.dead, gateway='')
+        self.assertEqual(bare['state'], 'offline')      # nothing to try: be honest
+        res = portal.check(probes=portal.PROBES, request=self.dead,
+                           gateway='127.0.0.1:%d' % s.port)
+        self.assertEqual(res['state'], 'portal')
+        self.assertEqual(res['url'], s.url('/'))
+
+    def test_an_admin_page_does_not_open_by_itself(self):
+        s = self.serve({'/': (200, {'Content-Type': 'text/html'},
+                              b'<html><title>FRITZ!Box</title>Einstellungen</html>')})
+        res = portal.check(probes=portal.PROBES, request=self.dead,
+                           gateway='127.0.0.1:%d' % s.port)
+        self.assertEqual(res['state'], 'offline')
+        self.assertTrue(res['url'].startswith('http://127.0.0.1:'))
+
+    def test_the_candidate_list_keeps_the_order_and_drops_duplicates(self):
+        self.assertEqual(portal.local_candidates('10.0.0.1', ['10.0.0.2', '10.0.0.1'], ['10.0.0.3']),
+                         ['10.0.0.1', '10.0.0.2', '10.0.0.3'])
+        self.assertEqual(portal.local_candidates(None, [], []), [])
+
+    def test_login_words(self):
+        self.assertTrue(portal.login_page(b'<h1>Bitte anmelden</h1>'))
+        self.assertTrue(portal.login_page(b'<a>Sign in</a>'))
+        self.assertFalse(portal.login_page(b'<title>FRITZ!Box</title>'))
+        self.assertFalse(portal.login_page(b''))
 
 
 class TestReasons(unittest.TestCase):

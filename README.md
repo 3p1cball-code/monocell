@@ -130,7 +130,11 @@ für diesen Zweck abfragen, und die Antwort darauf – eine Umleitung, ein 511, 
 Seite, wo keine erwartet war. Gefundenes Login geht gleich im Grafikmodus auf.
 Meldet die Prüfung ein offenes Netz, sagt die App das und öffnet nichts; findet
 sie gar nichts, bleibt als letzte Möglichkeit das Gateway (bei Bahn-Netzen
-`wifi.bahn.de` bzw. `login.wifionice.de`).
+`wifi.bahn.de` bzw. `login.wifionice.de`). Netze, die bis zur Anmeldung **gar kein
+DNS** herausgeben (Zug, Hotel), werden über Adressen gesucht: Gateway, die
+DNS-Server selbst und eine vom DHCP genannte Portal-Adresse (RFC 8910) – eine
+Umleitung oder 511 dort ist Beweis, eine gewöhnliche Seite zählt nur, wenn sie wie
+eine Anmeldung aussieht.
 
 Ein **Klick** auf ein Netz verbindet (Doppelklick und `Enter` auch); ohne
 polkit-Agent auf der Konsole braucht NetworkManager dafür die Regel aus
