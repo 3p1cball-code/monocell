@@ -132,6 +132,11 @@ Meldet die Prüfung ein offenes Netz, sagt die App das und öffnet nichts; finde
 sie gar nichts, bleibt als letzte Möglichkeit das Gateway (bei Bahn-Netzen
 `wifi.bahn.de` bzw. `login.wifionice.de`).
 
+Ein **Klick** auf ein Netz verbindet (Doppelklick und `Enter` auch); ohne
+polkit-Agent auf der Konsole braucht NetworkManager dafür die Regel aus
+`deploy/x61s/install-login.sh` (`50-monocell-network.rules`) – fehlt sie, sagt die
+App das und nennt den Befehl.
+
 **Captive Portal, automatisch:** Ein eigener Wächter (`monocell/portal.py`) hängt an
 `nmcli monitor`, prüft beim Start und danach alle 90 s und schaltet sofort, wenn
 NetworkManager eine Anmeldung meldet. Findet er ein Portal, steht in der

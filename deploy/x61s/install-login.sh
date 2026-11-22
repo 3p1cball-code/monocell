@@ -136,6 +136,39 @@ RULE
     echo "media: mounting removable drives allowed for $USER_NAME (udisks2 + polkit rule)"
 fi
 
+# ---------------------------------------------------------------- NetworkManager
+# The Network app connects with nmcli. On the VT there is no polkit agent that could
+# ask for a password, and logind does not always call the console session "active"
+# while an X session sits on the same seat (Debian's own NM rule wants exactly that,
+# so "nmcli device wifi connect" ended in "Insufficient privileges"). Allow the
+# actions the app needs, for this user only.
+if printf '%s' "$USER_NAME" | grep -q '^[A-Za-z0-9_-][A-Za-z0-9_.-]*$'; then
+    cat > /etc/polkit-1/rules.d/50-monocell-network.rules <<RULE
+// monocell connects to wifi on the console (nmcli, no polkit agent there)
+polkit.addRule(function(action, subject) {
+    if (!subject.local || subject.user != "$USER_NAME") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var allow = ["org.freedesktop.NetworkManager.network-control",
+                 "org.freedesktop.NetworkManager.settings.modify.system",
+                 "org.freedesktop.NetworkManager.settings.modify.own",
+                 "org.freedesktop.NetworkManager.wifi.scan",
+                 "org.freedesktop.NetworkManager.wifi.share.open",
+                 "org.freedesktop.NetworkManager.wifi.share.protected",
+                 "org.freedesktop.NetworkManager.enable-disable-wifi",
+                 "org.freedesktop.NetworkManager.enable-disable-network",
+                 "org.freedesktop.NetworkManager.enable-disable-networking",
+                 "org.freedesktop.NetworkManager.sleep-wake"];
+    if (allow.indexOf(action.id) >= 0) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});
+RULE
+    chmod 644 /etc/polkit-1/rules.d/50-monocell-network.rules
+    echo "network: NetworkManager allowed for $USER_NAME (nmcli on the console)"
+fi
+
 # ---------------------------------------------------------------- console mouse
 systemctl disable --now gpm.service >/dev/null 2>&1 || true
 

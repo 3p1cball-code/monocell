@@ -46,6 +46,24 @@ def portal_address(connection, gateway=None):
     return 'http://%s/' % gateway if gateway else 'http://neverssl.com/'
 
 
+def explain_failure(text):
+    """The line to show when nmcli refuses: the few cases worth translating."""
+    lines = [l.strip() for l in (text or '').strip().splitlines() if l.strip()]
+    msg = lines[-1][:160] if lines else 'failed'
+    low = msg.lower()
+    if 'insufficient privileges' in low or 'not authorized' in low:
+        # on the console there is no polkit agent that could ask for a password
+        return ('no permission (polkit) - run: sudo ~/.local/share/monocell/deploy/'
+                'x61s/install-login.sh')
+    if 'secrets were required' in low:
+        return 'wrong password'
+    if 'no network with ssid' in low:
+        return 'network not there any more - r rescans'
+    if '802-11-wireless-security' in low or 'key-mgmt' in low:
+        return 'this network needs a password or a WPA-Enterprise setup'
+    return msg
+
+
 def portal_button_label(x, width):
     """Label of the sign-in button: the full word, shortened at the window's edge."""
     for label in ('Anmeldeseite', 'Anmeldung', 'Login'):
@@ -89,6 +107,7 @@ class Network(App):
         super().__init__(wm, win)
         self.list = ListView()
         self.list.on_activate = self.connect
+        self.list.click_activates = True     # a click on a network is "connect to it"
         self.networks = []
         self.state = {}
         self.err = ''
@@ -174,7 +193,7 @@ class Network(App):
                 if any('connect' in a for a in args):
                     self.look_for_portal()
             else:
-                self.err = (text.splitlines() or ['failed'])[-1][:160]
+                self.err = explain_failure(text)
                 self.invalidate()
 
         def fail(e):

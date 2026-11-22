@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Wifi on the console: one click connects, and the refusal has a reason.** The
+  network list only connected on a double click or Enter - a single click just moved
+  the selection, so a click on a network looked like nothing happened. `ListView` grew
+  `click_activates` and the network list sets it: a row *is* the action there. And when
+  NetworkManager says "Insufficient privileges" (it does on a bare VT: Debian's polkit
+  rule wants an *active* session and there is no agent that could ask for a password),
+  the app says so and names the fix instead of passing the raw sentence on.
+  `deploy/x61s/install-login.sh` now installs a polkit rule for NetworkManager
+  (`50-monocell-network.rules`, the actions the Network app needs, for that one user),
+  so connecting works without an agent.
+
 - **Captive portals are found and opened by themselves.** A wifi that wants a login
   looks like a broken network from the inside: names resolve somewhere odd, requests
   come back with a page nobody asked for, HTTPS fails with `wrong version number`.

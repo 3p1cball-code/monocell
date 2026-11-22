@@ -680,6 +680,21 @@ class TestScrollbars(unittest.TestCase):
         from monocell.theme import Config, Theme
         self.th = Theme(Config())
 
+    def test_list_activation_needs_a_double_click_or_the_flag(self):
+        from monocell.term import Mouse
+        from monocell.widgets import ListView
+        seen = []
+        lv = ListView(['a', 'b'])
+        lv.on_activate = lambda item: seen.append(item)
+        lv.h = 2
+        lv.mouse(Mouse('down', 1, 1), 1)          # one click only selects
+        self.assertEqual((seen, lv.sel), ([], 1))
+        lv.mouse(Mouse('down', 1, 0, clicks=2), 0)
+        self.assertEqual(seen, ['a'])
+        lv.click_activates = True                  # lists where a row is the action
+        lv.mouse(Mouse('down', 1, 1), 1)
+        self.assertEqual(seen, ['a', 'b'])
+
     def test_list_scrollbar_click_and_drag(self):
         from monocell.screen import Buffer, Canvas
         from monocell.term import Mouse

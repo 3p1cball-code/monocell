@@ -298,6 +298,22 @@ class TestWatch(unittest.TestCase):
         self.assertEqual(self.wm.opened, [])
 
 
+class TestNetworkErrors(unittest.TestCase):
+    def test_a_polkit_refusal_says_how_to_fix_it(self):
+        from monocell.apps.network import explain_failure
+        msg = explain_failure("Error: Failed to add 'x' connection: Insufficient privileges")
+        self.assertIn('polkit', msg)
+        self.assertIn('install-login.sh', msg)
+
+    def test_common_nmcli_answers(self):
+        from monocell.apps.network import explain_failure
+        self.assertEqual(explain_failure('Error: Connection activation failed: '
+                                         'Secrets were required, but not provided.'), 'wrong password')
+        self.assertIn('rescan', explain_failure('Error: No network with SSID xyz found.'))
+        self.assertEqual(explain_failure(''), 'failed')
+        self.assertEqual(explain_failure('something odd'), 'something odd')
+
+
 class TestNetworkPortalButton(unittest.TestCase):
     """The button in the network app asks the network, it does not guess."""
 

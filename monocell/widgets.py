@@ -240,6 +240,7 @@ class ListView:
         self.h = 1
         self.on_activate = None
         self.on_select = None
+        self.click_activates = False   # one click is enough (lists where a row IS the action)
         self.sb = None
         self.sb_grab = None
 
@@ -345,7 +346,8 @@ class ListView:
             idx = self.top + ry
             if 0 <= idx < n:
                 self.select(idx)
-                if ev.kind == 'down' and ev.clicks >= 2 and self.on_activate:
+                if ev.kind == 'down' and self.on_activate and \
+                        (ev.clicks >= 2 or self.click_activates):
                     self.on_activate(self.current())
             return True
         return False
