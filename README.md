@@ -124,12 +124,13 @@ Helligkeit braucht Schreibrechte auf `/sys/class/backlight/*/brightness` – daf
 gibt es eine udev-Regel in `deploy/x61s/`. WLAN-Netze wählen, Passwort eingeben
 und das Radio ab-/anschalten: Startmenü → System → **Network**
 (NetworkManager/`nmcli`). Bei Captive Portals (Bahn, Hotel, Flughafen) zeigt die App
-`sign-in`; **`p`/Portal** öffnet die Anmeldeseite im Browser, gleich im
-Grafikmodus. Welche Adresse das ist, **fragt Monocell das Netz selbst** (siehe
-unten): die drei Sondieradressen, die Telefone und Laptops für diesen Zweck
-abfragen, und die Antwort darauf – eine Umleitung, ein 511, eine Seite, wo keine
-erwartet war. Gibt es keine Antwort, nimmt es die üblichen Bahn-Adressen
-(`wifi.bahn.de`, `login.wifionice.de`) und sonst das Gateway.
+`sign-in`, und der Knopf **Anmeldeseite** (`p`) **sucht die Seite des Netzes** –
+kein fest eingetragener Link: die drei Sondieradressen, die Telefone und Laptops
+für diesen Zweck abfragen, und die Antwort darauf – eine Umleitung, ein 511, eine
+Seite, wo keine erwartet war. Gefundenes Login geht gleich im Grafikmodus auf.
+Meldet die Prüfung ein offenes Netz, sagt die App das und öffnet nichts; findet
+sie gar nichts, bleibt als letzte Möglichkeit das Gateway (bei Bahn-Netzen
+`wifi.bahn.de` bzw. `login.wifionice.de`).
 
 **Captive Portal, automatisch:** Ein eigener Wächter (`monocell/portal.py`) hängt an
 `nmcli monitor`, prüft beim Start und danach alle 90 s und schaltet sofort, wenn

@@ -179,6 +179,20 @@ class TestCheck(unittest.TestCase):
         self.assertTrue(res['url'].startswith('http://127.0.0.1:'))
 
 
+class TestNetworkButton(unittest.TestCase):
+    def test_the_button_says_what_it_opens(self):
+        from monocell.apps.network import portal_button_label
+        self.assertEqual(portal_button_label(33, 78), 'Anmeldeseite')   # normal window
+        self.assertEqual(portal_button_label(33, 47), 'Anmeldung')      # narrow
+        self.assertEqual(portal_button_label(33, 44), 'Login')          # minimum size
+
+    def test_the_spaces_of_a_button_count(self):
+        from monocell.apps.network import portal_button_label
+        # ' Anmeldeseite ' plus the gap behind it: 15 cells from x
+        self.assertEqual(portal_button_label(33, 33 + 15), 'Anmeldeseite')
+        self.assertEqual(portal_button_label(33, 33 + 14), 'Anmeldung')
+
+
 class TestReasons(unittest.TestCase):
     def test_network_errors_from_the_lite_engine(self):
         for text in ('<urlopen error [Errno -3] Temporary failure in name resolution>',
@@ -282,6 +296,65 @@ class TestWatch(unittest.TestCase):
         self.watch.auto_open = False
         self.watch.apply(self.result('portal', 'http://p/login'))
         self.assertEqual(self.wm.opened, [])
+
+
+class TestNetworkPortalButton(unittest.TestCase):
+    """The button in the network app asks the network, it does not guess."""
+
+    def make(self, state='portal', url='http://portal.example/login', detail='redirect',
+             conn='HomeNet'):
+        from monocell.apps.network import Network
+        app = Network.__new__(Network)
+        app.state = {'connection': conn, 'device': 'wls3'}
+        app.networks = []
+        app.busy = ''
+        app.msg = app.err = ''
+        app.invalidate = lambda: None
+        app.wm = FakeWM()
+        res = {'state': state, 'url': url, 'detail': detail, 'at': 1.0}
+
+        def run(work, done=None, error=None):
+            done(res)
+        app.thread = run
+        return app
+
+    def test_a_found_page_is_opened_in_graphics_mode(self):
+        app = self.make()
+        with mock.patch.object(portal, 'check', return_value={'state': 'portal',
+                                                              'url': 'http://portal.example/login',
+                                                              'detail': 'redirect', 'at': 1.0}):
+            app.open_portal()
+        self.assertEqual(app.wm.opened, [('browser', {'url': 'http://portal.example/login',
+                                                      'gfx': True})])
+        self.assertEqual(app.wm.portal_state, 'portal')
+
+    def test_an_open_network_opens_nothing(self):
+        app = self.make(state='online', url='', detail='reachable')
+        with mock.patch.object(portal, 'check', return_value={'state': 'online', 'url': '',
+                                                              'detail': 'reachable', 'at': 1.0}):
+            app.open_portal()
+        self.assertEqual(app.wm.opened, [])
+        self.assertIn('No login needed', app.wm.toasts[-1][0])
+
+    def test_without_a_finding_only_the_gateway_is_tried(self):
+        app = self.make(state='offline', url='', detail='no name resolution')
+        from monocell.apps import network
+        with mock.patch.object(portal, 'check', return_value={'state': 'offline', 'url': '',
+                                                              'detail': 'no name resolution',
+                                                              'at': 1.0}), \
+                mock.patch.object(network.hardware, 'default_gateway',
+                                  return_value='10.0.0.1'):
+            app.open_portal()
+        self.assertEqual(app.wm.opened, [('browser', {'url': 'http://10.0.0.1/',
+                                                      'gfx': True})])
+
+    def test_a_rail_login_is_still_offered_when_nothing_answers(self):
+        app = self.make(state='offline', url='', detail='no name resolution', conn='WIFI@DB')
+        with mock.patch.object(portal, 'check', return_value={'state': 'offline', 'url': '',
+                                                              'detail': 'no name resolution',
+                                                              'at': 1.0}):
+            app.open_portal()
+        self.assertEqual(app.wm.opened[0][1]['url'], 'http://wifi.bahn.de/')
 
 
 class TestBrowserHooks(unittest.TestCase):

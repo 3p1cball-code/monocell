@@ -46,6 +46,14 @@ def portal_address(connection, gateway=None):
     return 'http://%s/' % gateway if gateway else 'http://neverssl.com/'
 
 
+def portal_button_label(x, width):
+    """Label of the sign-in button: the full word, shortened at the window's edge."""
+    for label in ('Anmeldeseite', 'Anmeldung', 'Login'):
+        if x + len(label) + 3 <= width:
+            return label
+    return 'Login'
+
+
 def parse_networks(text):
     nets = {}
     for line in (text or '').splitlines():
@@ -215,21 +223,15 @@ class Network(App):
                 break
         return name
 
-    def portal_url(self):
-        """The address the network itself named, else the usual guesses."""
-        found = getattr(self.wm, 'portal_url', '') or ''
-        if found and getattr(self.wm, 'portal_state', None) == 'portal':
-            return found
-        return portal_address(self.portal_name(), hardware.default_gateway())
-
     def open_portal(self):
+        """Ask the network where its login page is, and open that - whatever the network.
+
+        No guessed address: the three probes tell a redirect, a 511 or an interception
+        apart, and only a real finding opens a page. When nothing is found the gateway
+        is the last place a login can hide."""
         if not self.state.get('connection'):
             self.wm.toast('Connect to a network first', 'yellow')
             return
-        if getattr(self.wm, 'portal_url', '') and getattr(self.wm, 'portal_state', None) == 'portal':
-            self.wm.open('browser', url=self.wm.portal_url, gfx=True)
-            return
-        # Nothing known about this network yet: ask it (a portal answers its own way)
         self.busy = 'looking for the login page...'
         self.invalidate()
 
@@ -239,12 +241,18 @@ class Network(App):
         def done(res):
             self.busy = ''
             self.invalidate()
-            if res.get('state') == 'portal' and res.get('url'):
-                self.wm.set_portal('portal', res['url'], res.get('detail') or '', res.get('at') or 0)
-                self.wm.open('browser', url=res['url'], gfx=True)
+            state, url = res.get('state'), res.get('url') or ''
+            detail = res.get('detail') or ''
+            self.wm.set_portal(state, url, detail, res.get('at') or 0)
+            if state == 'portal' and url:
+                self.wm.toast('Sign-in page: %s' % detail, 'yellow')
+                self.wm.open('browser', url=url, gfx=True)
+            elif state == 'online':
+                self.wm.toast('No login needed - this network is open', 'accent')
             else:
-                self.wm.toast('No login page found (%s)' % (res.get('detail') or 'offline'), 'yellow')
-                self.wm.open('browser', url=self.portal_url(), gfx=True)
+                self.wm.toast('No sign-in page found (%s)' % detail, 'yellow')
+                self.wm.open('browser', url=portal_address(self.portal_name(),
+                                                           hardware.default_gateway()), gfx=True)
 
         def bad(e):
             self.busy = ''
@@ -296,8 +304,9 @@ class Network(App):
         x += button(self, cv, x, 3, 'Wi-Fi off' if on else 'Wi-Fi on', 'radio') + 1
         if conn:
             x += button(self, cv, x, 3, 'Disconnect', 'off') + 1
-            label = 'Bahn WLAN' if known_portal(self.portal_name()) else 'Portal'
-            x += button(self, cv, x, 3, label, 'portal', primary=bool(portal)) + 1
+            # the network's own login page, whichever network it is
+            x += button(self, cv, x, 3, portal_button_label(x, w), 'portal',
+                        primary=bool(portal)) + 1
         y = 5
         cv.put(1, 4, '%d networks' % len(self.networks), th.c('dim', 'win'))
 
@@ -325,7 +334,7 @@ class Network(App):
             cv.put(1, h - 1, fit(msg, w - 2), th.c('red' if self.err else 'dim', 'win'))
         else:
             cv.put(1, h - 1,
-                   fit('enter connect  r rescan  w wifi on/off  d disconnect  p portal', w - 2),
+                   fit('enter connect  r rescan  w wifi on/off  d disconnect  p login page', w - 2),
                    th.c('dim', 'win'))
 
     # ------------------------------------------------------------ input

@@ -17,7 +17,9 @@
   puts a yellow `!` on the tray's network symbol, says so and opens the sign-in page in
   the browser's graphics mode - once per network, never again after the page was
   closed. When NetworkManager reports `full` again it says "online". The network app's
-  `p` uses the address the network named; the browser probes on its own when a page
+  `p`/the button **Anmeldeseite** probes the network itself and opens what it found
+  (an open network says so and opens nothing, only when nothing answers is the
+  gateway the last resort); the browser probes on its own when a page
   fails for network reasons (and offers *Find the network sign-in page* in its menu);
   a certificate nobody can verify - portals use their own CA - is retried once with
   `Security.setIgnoreCertificateErrors` instead of leaving Chromium's error page, which
