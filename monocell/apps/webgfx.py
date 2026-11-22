@@ -133,6 +133,7 @@ class WebGfx:
         self.incoming = None           # newest decoded frame from the reader thread
         self.stats = [0, 0.0, 0]       # frames composed, ms in compose, last JPEG bytes
         self.stat_at = time.monotonic()
+        self.cert_tries = 0            # certificate errors retried once (a portal's own CA)
 
     # ---------------------------------------------------------- lifecycle
     def start(self):
@@ -408,6 +409,7 @@ class WebGfx:
             # chrome-error address, so every later reload failed with "unknown url
             # type" instead of retrying the page that was asked for.
             self.status = 'Page not reachable - Ctrl+G for the text view, Ctrl+R to retry'
+            self.retry_certificate()
             self.later_check(6.0)
             self.refresh_hud()
             return
@@ -415,6 +417,30 @@ class WebGfx:
         self.editing = False
         self.hover = ''
         self.refresh_hud()
+
+    def retry_certificate(self):
+        """A failed page may be a certificate the headless tab cannot click through.
+
+        Captive portals answer HTTPS with a certificate of their own, and Chromium's
+        error page has no "continue anyway" a headless tab could press. Security.
+        setIgnoreCertificateErrors is scoped to this tab and used only after the page
+        already failed, once per stay."""
+        page = self.page
+        if self.cert_tries or page is None:
+            return False
+        self.cert_tries += 1
+        self.status = 'Certificate not verifiable - retrying'
+
+        def work():
+            try:
+                page.ignore_certificates()
+            except RuntimeError as e:
+                log('webgfx: certificates: %s' % e)
+                return False
+            page.reload(ignore_cache=True)
+            return True
+        self.app.thread(work, lambda ok: None, lambda e: log('webgfx: retry: %s' % e))
+        return True
 
     def on_loading(self, on):
         self.loading = on

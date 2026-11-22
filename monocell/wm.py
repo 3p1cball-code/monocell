@@ -773,6 +773,12 @@ class WM:
         loop.every(0.25, self.poll_thinklight)
         self.net = None
         self.net_signal = None
+        # captive portal: None until the first probe, then 'online' | 'portal' | 'offline'
+        self.portal_state = None
+        self.portal_url = ''            # the login page to open
+        self.portal_detail = ''         # why the probe thinks so
+        self.portal_at = 0.0
+        self.portal_watch = None        # portal.Watch, started by the entry point
         self.bt = None
         self.sound = None
         self.audio = None
@@ -1617,6 +1623,14 @@ class WM:
             self.brightness = None
         self.dirty = True
 
+    def set_portal(self, state, url='', detail='', at=0.0):
+        """Where the wifi stands (portal.Watch calls this from the UI thread)."""
+        self.portal_state = state
+        self.portal_url = url or ''
+        self.portal_detail = detail or ''
+        self.portal_at = at or 0.0
+        self.dirty = True
+
     def battery_text(self):
         cap, st = self.battery
         segs = 4
@@ -2206,7 +2220,11 @@ class WM:
                 icon = hardware.signal_bars(self.net_signal) or sym('wifi', ')))')
             else:
                 icon = sym('lan', '[=]')
-            tray.append(('net', icon, 'accent' if kind == 'wifi' else 'text', name))
+            portal = self.portal_state == 'portal'
+            if portal:
+                icon += '!'                     # a login page is waiting
+            tray.append(('net', icon, 'yellow' if portal else
+                         'accent' if kind == 'wifi' else 'text', name))
         if self.brightness is not None:
             tray.append(('bright', '%s %d%%' % (sym('bright', '*'), self.brightness), 'text',
                          'backlight'))

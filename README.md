@@ -123,11 +123,27 @@ Kalender. **Fn-Tasten** für Helligkeit und Lautstärke sowie
 Helligkeit braucht Schreibrechte auf `/sys/class/backlight/*/brightness` – dafür
 gibt es eine udev-Regel in `deploy/x61s/`. WLAN-Netze wählen, Passwort eingeben
 und das Radio ab-/anschalten: Startmenü → System → **Network**
-(NetworkManager/`nmcli`). Bei Captive Portals (z. B. ICE-WLAN) zeigt die App
-`sign-in`; **`p`/Portal** (bei Bahn-Netzen **Bahn WLAN**) öffnet den Browser mit
-der Anmeldeseite gleich im Grafikmodus: WIFI@DB über `wifi.bahn.de`, WIFIonICE
-über `login.wifionice.de`, sonst Gateway/`neverssl.com`. Beide Bahn-Logins stehen
-auch auf der Browser-Startseite und im Browser-Menü. Bluetooth-Geräte koppeln und
+(NetworkManager/`nmcli`). Bei Captive Portals (Bahn, Hotel, Flughafen) zeigt die App
+`sign-in`; **`p`/Portal** öffnet die Anmeldeseite im Browser, gleich im
+Grafikmodus. Welche Adresse das ist, **fragt Monocell das Netz selbst** (siehe
+unten): die drei Sondieradressen, die Telefone und Laptops für diesen Zweck
+abfragen, und die Antwort darauf – eine Umleitung, ein 511, eine Seite, wo keine
+erwartet war. Gibt es keine Antwort, nimmt es die üblichen Bahn-Adressen
+(`wifi.bahn.de`, `login.wifionice.de`) und sonst das Gateway.
+
+**Captive Portal, automatisch:** Ein eigener Wächter (`monocell/portal.py`) hängt an
+`nmcli monitor`, prüft beim Start und danach alle 90 s und schaltet sofort, wenn
+NetworkManager eine Anmeldung meldet. Findet er ein Portal, steht in der
+Taskleiste am Netz-Symbol ein **`!`** (gelb), es kommt ein Hinweis, und die
+**Anmeldeseite öffnet sich von selbst** im Grafikmodus – die Seite braucht fast
+immer JavaScript. Das passiert einmal je Netz; wer die Seite wegklickt, bekommt sie
+nicht bei jeder Prüfung wieder. Ist die Anmeldung durch, meldet `nmcli monitor`
+„full“ → Hinweis „online“. Zwei Prüfungen müssen sich einig sein, damit ein
+Proxy auf einem normalen Netz nicht zur Anmeldeseite wird. Antwortet eine
+HTTPS-Seite mit einem Zertifikat, das niemand prüfen kann (Portale haben ihre
+eigene CA), lädt der Grafikmodus sie einmal mit `Security.
+setIgnoreCertificateErrors` nach – Chromium kann in einem headless Tab nicht auf
+„Trotzdem fortfahren“ klicken. Bluetooth-Geräte koppeln und
 verbinden: Startmenü → System → **Bluetooth**, oder Klick auf das Bluetooth-Symbol
 in der Taskleiste (`bluetoothctl`/BlueZ, mit Pairing-Agent).
 
@@ -186,6 +202,12 @@ monocell-clip --clear
   `Ctrl+F` suchen. Erkennt die Textansicht eine reine JavaScript-Seite, sagt sie es.
   Die Startseite führt unter „WLAN login pages“ die Bahn-Logins (WIFI@DB,
   WIFIonICE) mit einem Klick; das Browser-Menü ebenso.
+  **WLAN-Anmeldung (Captive Portal):** Scheitert eine Seite an der Namensauflösung,
+  an einer Zeitüberschreitung oder an einer abgefangenen HTTPS-Verbindung, sagt die
+  Fehlerseite das und der Browser **sucht selbst die Anmeldeseite** – findet er sie,
+  springt er direkt in den Grafikmodus auf das Login. Dasselbe von Hand über
+  *Find the network sign-in page* im Browser-Menü. Der Hintergrund-Wächter des
+  Systems macht es zusätzlich beim Start und bei jedem Netzwechsel von selbst.
   **`Ctrl+G`** (oder `Gfx` in der Leiste) zeigt dieselbe Seite als **echte Pixel**: ein
   headless Chromium/Brave rendert sie und schickt über das DevTools-Protokoll ein Bild,
   sobald sich etwas ändert (kein Dauerfeuer; die Seite wartet auf unsere Bestätigung,

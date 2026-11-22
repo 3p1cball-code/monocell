@@ -1018,8 +1018,13 @@ class Page:
             raise RuntimeError(r['errorText'])
         return r
 
-    def reload(self):
-        self.call('Page.reload', {'ignoreCache': False})
+    def ignore_certificates(self):
+        """Let this tab load pages whose certificate nobody can verify (a portal's CA)."""
+        self.call('Security.enable', timeout=10)
+        self.call('Security.setIgnoreCertificateErrors', {'ignore': True}, timeout=10)
+
+    def reload(self, ignore_cache=False):
+        self.call('Page.reload', {'ignoreCache': bool(ignore_cache)})
 
     def history(self, delta):
         """One step back (-1) or forward (+1); False when there is none."""

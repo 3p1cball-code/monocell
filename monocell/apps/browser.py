@@ -5,7 +5,7 @@ import re
 import threading
 import urllib.parse
 
-from .. import imaging, web
+from .. import imaging, portal, web
 from ..app import App
 from .. import util
 from ..util import clean, fit, wrap_text
@@ -339,6 +339,7 @@ class Browser(App):
         self.edit = None           # (widget, TextField) while typing into a page field
         self.find = None
         self.reader = True
+        self.portal_tries = 0      # a page failed: how often we looked for a login page
         start = url or self.cfg.get('web_home') or HOME_URL
         self.every(0.5, self.gfx_idle)
         self.navigate(start)
@@ -418,6 +419,7 @@ class Browser(App):
         def done(doc):
             if doc is None or lid != self.load_id or self.win.closed:
                 return
+            self.portal_tries = 0
             self.show(doc)
 
         def fail(e):
@@ -433,7 +435,13 @@ class Browser(App):
                 blocks += [{'t': 'h', 'l': 2, 's': [{'x': 'This server does not speak TLS'}]},
                            {'t': 'p', 's': [{'x': alt, 'h': alt}]},
                            {'t': 'p', 's': [{'x': 'Enter opens the plain HTTP address.'}]}]
+            net = portal.looks_like_network_error(e)
+            if net:
+                blocks += [{'t': 'p', 's': [{'x': 'This looks like a wifi that wants a login '
+                                                  '(captive portal) - looking for its sign-in page.'}]}]
             self.show({'title': 'Error', 'url': url, 'blocks': blocks})
+            if net:
+                self.find_portal()
         self.thread(work, done, fail)
 
     def show(self, doc):
@@ -476,6 +484,56 @@ class Browser(App):
         url, sc = self.future.pop()
         self.history.append((self.url, self.scroll))
         self.navigate(url, record=False)
+
+    # ------------------------------------------------------------ captive portal
+    def find_portal(self):
+        """A page failed because of the network: ask where the login page is."""
+        if self.portal_tries >= 2:
+            return
+        self.portal_tries += 1
+        self.status = 'Looking for the network sign-in page...'
+
+        def work():
+            return portal.check()
+
+        def done(res):
+            self.status = ''
+            if res.get('state') == 'portal' and res.get('url'):
+                self.wm.set_portal('portal', res['url'], res.get('detail') or '', res.get('at') or 0)
+                self.wm.toast('Sign-in page: %s' % (res.get('detail') or 'this network'), 'yellow')
+                self.want_gfx = True
+                self.navigate(res['url'])
+            else:
+                self.notice = 'No network sign-in page found (%s)' % (res.get('detail') or 'offline')
+                self.invalidate()
+
+        def bad(e):
+            self.status = ''
+            util.log('browser: portal check: %s' % e)
+        self.thread(work, done, bad)
+
+    def portal_now(self):
+        """Menu: show the network's sign-in page (probe first when it is unknown)."""
+        watch = getattr(self.wm, 'portal_watch', None)
+        if watch is not None and self.wm.portal_state == 'portal' and self.wm.portal_url:
+            self.want_gfx = True
+            self.navigate(self.wm.portal_url)
+            return
+        self.status = 'Looking for the network sign-in page...'
+
+        def work():
+            return portal.check()
+
+        def done(res):
+            self.status = ''
+            if res.get('state') == 'portal' and res.get('url'):
+                self.want_gfx = True
+                self.navigate(res['url'])
+            else:
+                self.wm.toast('No sign-in page found (%s)' % (res.get('detail') or 'offline'),
+                              'yellow')
+
+        self.thread(work, done, lambda e: self.wm.toast(str(e), 'red'))
 
     def home_doc(self):
         bm = self.cfg.get('bookmarks', [])
@@ -701,6 +759,7 @@ class Browser(App):
         items += [None]
         for name, url in WLAN_LOGINS:
             items.append(MenuItem('WLAN: ' + name, (lambda u=url: self.navigate(u))))
+        items.append(MenuItem('Find the network sign-in page', self.portal_now))
         items += [None,
                   MenuItem('Graphics mode (Chromium, JS)', self.enter_gfx, 'Ctrl+G'),
                   MenuItem('Reader mode', self.toggle_reader, checked=self.reader),

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Captive portals are found and opened by themselves.** A wifi that wants a login
+  looks like a broken network from the inside: names resolve somewhere odd, requests
+  come back with a page nobody asked for, HTTPS fails with `wrong version number`.
+  Until now Monocell only offered two hard-coded railway addresses by hand - and on a
+  train that is exactly the moment nothing works. The new `portal.py` asks the three
+  addresses phones and laptops use for this purpose
+  (`connectivitycheck.gstatic.com/generate_204`, `detectportal.firefox.com/success.txt`,
+  `nmcheck.gnome.org/...`) and **reads** the answer instead of following it: a redirect
+  names the login page, 511 means "authentication required", a page where a 204 or
+  "success" belongs means somebody is in the way. Two probes have to agree, so a proxy
+  that merely blocks one address does not turn into a login page that opens by itself.
+  **Watch** hangs on `nmcli monitor`, probes at start and every 90 s, and on a portal
+  puts a yellow `!` on the tray's network symbol, says so and opens the sign-in page in
+  the browser's graphics mode - once per network, never again after the page was
+  closed. When NetworkManager reports `full` again it says "online". The network app's
+  `p` uses the address the network named; the browser probes on its own when a page
+  fails for network reasons (and offers *Find the network sign-in page* in its menu);
+  a certificate nobody can verify - portals use their own CA - is retried once with
+  `Security.setIgnoreCertificateErrors` instead of leaving Chromium's error page, which
+  a headless tab cannot click through. `tests/test_portal.py` (28 tests).
+
+## Unreleased
+
 - **Programs in a terminal can copy again (OSC 52).** Modern TUI programs -
   opencode, vim, tmux, anything on a current toolkit - put a copy on the wire as
   `ESC ] 52 ; <selection> ; <base64>`, and the parser dropped that sequence on the

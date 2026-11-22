@@ -124,6 +124,11 @@ def main(argv=None):
             startup.play(cfg)
         except Exception:
             util.log('startup sound unavailable: ' + traceback.format_exc())
+        try:
+            from . import portal
+            portal.start(wm)
+        except Exception:
+            util.log('portal watch unavailable: ' + traceback.format_exc())
         loop.run(idle)
     except KeyboardInterrupt:
         pass
@@ -138,6 +143,11 @@ def main(argv=None):
         if remote:
             try:
                 remote.stop()
+            except Exception:
+                pass
+        if getattr(wm, 'portal_watch', None):
+            try:
+                wm.portal_watch.stop()
             except Exception:
                 pass
         if hotkeys:

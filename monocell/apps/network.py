@@ -2,7 +2,7 @@
 import re
 import subprocess
 
-from .. import hardware
+from .. import hardware, portal
 from ..app import App
 from ..util import fit, which
 from ..widgets import ListView, button
@@ -163,6 +163,8 @@ class Network(App):
             if rc == 0:
                 self.msg = ok or msg
                 self.scan(rescan=False)
+                if any('connect' in a for a in args):
+                    self.look_for_portal()
             else:
                 self.err = (text.splitlines() or ['failed'])[-1][:160]
                 self.invalidate()
@@ -172,6 +174,12 @@ class Network(App):
             self.err = str(e)
             self.invalidate()
         self.thread(work, done, fail)
+
+    def look_for_portal(self):
+        """A fresh connection: let the watcher look for a login page (once)."""
+        watch = getattr(self.wm, 'portal_watch', None)
+        if watch is not None:
+            self.later(4.0, lambda: watch.probe('connect'))
 
     def connect(self, net=None):
         net = net or self.list.current()
@@ -192,6 +200,13 @@ class Network(App):
         else:
             self.connect_with(net, '')
 
+    def wants_login(self):
+        """True when a login is waiting: the probe said so, or NetworkManager did."""
+        if getattr(self.wm, 'portal_state', None) == 'portal':
+            return True
+        return (self.state.get('connectivity') in ('portal', 'limited')
+                or known_portal(self.portal_name()))
+
     def portal_name(self):
         name = self.state.get('connection') or ''
         for n in self.networks:
@@ -201,13 +216,41 @@ class Network(App):
         return name
 
     def portal_url(self):
+        """The address the network itself named, else the usual guesses."""
+        found = getattr(self.wm, 'portal_url', '') or ''
+        if found and getattr(self.wm, 'portal_state', None) == 'portal':
+            return found
         return portal_address(self.portal_name(), hardware.default_gateway())
 
     def open_portal(self):
         if not self.state.get('connection'):
             self.wm.toast('Connect to a network first', 'yellow')
             return
-        self.wm.open('browser', url=self.portal_url(), gfx=True)
+        if getattr(self.wm, 'portal_url', '') and getattr(self.wm, 'portal_state', None) == 'portal':
+            self.wm.open('browser', url=self.wm.portal_url, gfx=True)
+            return
+        # Nothing known about this network yet: ask it (a portal answers its own way)
+        self.busy = 'looking for the login page...'
+        self.invalidate()
+
+        def work():
+            return portal.check()
+
+        def done(res):
+            self.busy = ''
+            self.invalidate()
+            if res.get('state') == 'portal' and res.get('url'):
+                self.wm.set_portal('portal', res['url'], res.get('detail') or '', res.get('at') or 0)
+                self.wm.open('browser', url=res['url'], gfx=True)
+            else:
+                self.wm.toast('No login page found (%s)' % (res.get('detail') or 'offline'), 'yellow')
+                self.wm.open('browser', url=self.portal_url(), gfx=True)
+
+        def bad(e):
+            self.busy = ''
+            self.invalidate()
+            self.wm.toast(str(e), 'red')
+        self.thread(work, done, bad)
 
     def connect_with(self, net, password):
         if self.busy:
@@ -228,8 +271,7 @@ class Network(App):
         st = self.state
         conn = st.get('connection') or ''
         on = st.get('radio', True)
-        portal = conn and (st.get('connectivity') in ('portal', 'limited')
-                           or known_portal(self.portal_name()))
+        portal = bool(conn) and self.wants_login()
         cv.put(1, 0, 'Network', th.c('accent', 'win', 1))
         chip = 'sign-in' if portal else 'connected' if conn else 'disconnected'
         col = 'yellow' if portal else 'accent' if conn else 'dim'
